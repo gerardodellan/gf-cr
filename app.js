@@ -27,12 +27,18 @@
 
   function mostrar(v, { push = true } = {}) {
     if (v === 'scan') return abrirEscaner();
-    if (push && actual && actual !== v && actual !== 'loading') pila.push(actual);
+    if (push && actual && actual !== v && actual !== 'loading') { pila.push(actual); history.pushState({ v }, ''); }
     document.querySelectorAll('.view').forEach(e => e.classList.toggle('on', e.id === 'v-' + v));
     actual = v;
     document.querySelectorAll('.bottom button').forEach(b => b.classList.toggle('on', b.dataset.tab === v));
     if (v === 'history') pintarHistorial();
     window.scrollTo(0, 0);
+  }
+  function volverAlInicio() {
+    const n = pila.length;
+    pila.length = 0;
+    if (n) history.go(-n);
+    mostrar('history', { push: false });
   }
   function atras() {
     const v = pila.pop();
@@ -47,7 +53,14 @@
     if (v === 'form') prepararForm();
     mostrar(v);
   });
+  // la flecha usa la misma pila que el gesto; si quedan entradas de más en history, el gesto solo muestra el historial
   $('#btn-back').onclick = atras;
+  // gesto "atrás" del teléfono: vuelve a la pantalla anterior en vez de cerrar la app
+  window.addEventListener('popstate', () => {
+    if (!$('#v-scan').hidden) return cerrarEscaner();
+    if ($('#drawer').classList.contains('on')) return cerrarMenu();
+    atras();
+  });
   $('#btn-menu').onclick = () => $('#drawer').classList.add('on');
   $('#scrim').onclick = cerrarMenu;
   function cerrarMenu() { $('#drawer').classList.remove('on'); }
@@ -87,7 +100,7 @@
       const r = await fetch(`${CFG.API}?codigo=${encodeURIComponent(codigo)}&t=${encodeURIComponent(CFG.TOKEN)}`, { signal: ctl.signal });
       clearTimeout(to);
       const j = await r.json();
-      if (j.error) throw new Error(j.error === 'codigo' ? 'Código no válido' : j.error);
+      if (j.error) throw new Error({ codigo: 'Código no válido', off: 'La fuente de datos no respondió. Probá de nuevo en un minuto.' }[j.error] || j.error);
       if (!j.encontrado) {
         if (silencioso) return;
         $('#nf-codigo').textContent = codigo;
@@ -99,7 +112,7 @@
     } catch (err) {
       if (silencioso) return;
       alert(err.name === 'AbortError' ? 'Sin respuesta del servidor. Revisá la conexión.' :
-            (navigator.onLine ? 'Error: ' + err.message : 'Sin conexión.'));
+            (navigator.onLine ? err.message : 'Sin conexión.'));
       mostrar('history');
     }
   }
@@ -124,8 +137,7 @@
   $('#r-del').onclick = () => {
     if (!producto) return;
     guardarHist(leerHist().filter(x => x.codigo !== producto.codigo));
-    pila.length = 0;
-    mostrar('history', { push: false });
+    volverAlInicio();
   };
   $('#r-share').onclick = () => compartir(producto);
   function compartir(p) {
@@ -152,7 +164,11 @@
   $('#form').foto.onchange = async e => {
     const file = e.target.files[0];
     if (!file) return;
-    fotoB64 = await achicar(file, 1600, 0.8);
+    $('#f-send').disabled = true;
+    $('#f-msg').textContent = 'Preparando la foto…';
+    try { fotoB64 = await achicar(file, 1600, 0.8); } catch { fotoB64 = ''; $('#f-msg').textContent = 'No se pudo leer la foto.'; }
+    $('#f-send').disabled = false;
+    if (fotoB64) $('#f-msg').textContent = '';
     $('#f-prev').src = fotoB64;
     $('#f-prev').style.display = 'block';
   };
@@ -182,9 +198,9 @@
         body: JSON.stringify({ t: CFG.TOKEN, codigo: codigoActual, nombre: f.nombre.value, marca: f.marca.value,
                                etiqueta: f.etiqueta.value, mensaje: f.mensaje.value, foto_base64: fotoB64 }) });
       const j = await r.json();
-      if (!j.ok) throw new Error(j.error || 'error');
+      if (!j.ok) throw new Error({ limite: 'se alcanzó el límite de altas de hoy', foto: 'la foto es muy grande' }[j.error] || j.error || 'error');
       $('#f-msg').textContent = '¡Gracias! Queda en ALERTA hasta que se revise.';
-      setTimeout(() => { pila.length = 0; mostrar('history', { push: false }); }, 1600);
+      setTimeout(volverAlInicio, 1600);
     } catch (err) {
       $('#f-msg').textContent = 'No se pudo enviar: ' + err.message;
       $('#f-send').disabled = false;
@@ -275,6 +291,13 @@
       o.start(); o.stop(ac.currentTime + 0.09);
     } catch {}
   }
+
+  // al salir de la app la cámara se apaga; al volver, se reabre si estaba escaneando
+  let reabrir = false;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && corriendo) { reabrir = true; cerrarEscaner(); }
+    else if (!document.hidden && reabrir) { reabrir = false; abrirEscaner(); }
+  });
 
   // ---------- arranque: como la referencia, abre directo en el escáner ----------
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
