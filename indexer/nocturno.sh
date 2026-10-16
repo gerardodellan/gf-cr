@@ -4,6 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 indexer/crawl_maxipali.py
+# Auto Mercado (texto de ingredientes, sin EAN): se exporta los domingos o si falta; el cruce corre cada noche
+if [ "$(date +%u)" = 7 ] || [ ! -f indexer/data/automercado.jsonl ]; then python3 indexer/export_automercado.py || echo "aviso: export Auto Mercado falló; se usa el anterior"; fi
+[ -f indexer/data/automercado.jsonl ] && python3 indexer/cruce_automercado.py
 node indexer/construir_indice.js
 if git diff --quiet -- web/datos/indice.json; then echo "índice sin cambios"; exit 0; fi
 git add web/datos/indice.json

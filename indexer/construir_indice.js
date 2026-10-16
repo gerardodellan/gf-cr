@@ -19,14 +19,25 @@ if (estado.recorrido && crudo.length < estado.recorrido * 0.7) {
 }
 const hoy = new Date().toISOString().slice(0, 10);
 const p = Object.assign({}, previo.p);
-let nuevos = 0, cambiados = 0, fuera = 0, vueltos = 0;
+let nuevos = 0, cambiados = 0, fuera = 0, vueltos = 0, cruzados = 0;
+const cruce = {};
+try { for (const l of fs.readFileSync(path.join(__dirname, 'data/cruce.jsonl'), 'utf8').trim().split('\\n')) { if (l) { const o = JSON.parse(l); cruce[o.ean] = o.texto; } } } catch {}
 const listados = new Set();
 for (const x of crudo) {
   let txt = x.ingredientes.trim();
   if (x.alergenos && !/^(si|sí|no|n\\/a)$/i.test(x.alergenos.trim())) txt = (txt ? txt + '. ' : '') + 'Alérgenos: ' + x.alergenos;
-  const c = clasificar_({ ingredientes: txt, nombre: x.nombre }, T);
+  let c = clasificar_({ ingredientes: txt, nombre: x.nombre }, T);
   let ean = x.ean;
   if (ean.length === 13 && ean[0] === '0') ean = ean.slice(1);   // misma forma canónica que normalizarCodigo_
+  if (c.motivo === 'Sin información suficiente' && cruce[x.ean]) {
+    // texto de Auto Mercado cruzado por nombre: solo puede SUBIR el riesgo (F, D, E). Un C/B por cruce baja a E.
+    const ca = clasificar_({ ingredientes: cruce[x.ean], nombre: x.nombre }, T);
+    if (ca.motivo !== 'Sin información suficiente') {
+      c = ['F', 'D', 'E'].includes(ca.nivel) ? { nivel: ca.nivel, motivo: ca.motivo + ' (Auto Mercado)' }
+        : { nivel: 'E', motivo: 'Auto Mercado no lista ingredientes con gluten; confirmar en el empaque' };
+      cruzados++;
+    }
+  }
   if (c.motivo === 'Sin información suficiente') { fuera++; delete p[ean]; continue; }
   const antes = p[ean];
   if (!antes) nuevos++; else if (antes[1] !== c.nivel || antes[2] !== c.motivo) cambiados++;
@@ -40,6 +51,6 @@ const n = Object.keys(p).length, noListados = Object.values(p).filter(x => x[3])
 const sinCambios = !nuevos && !cambiados && !bajas && !vueltos && Object.keys(previo.p).length === n;
 fs.writeFileSync(salida, JSON.stringify({ v: sinCambios ? previo.v : hoy, fuente: 'MaxiPalí', p }));
 fs.writeFileSync(fEstado, JSON.stringify({ recorrido: crudo.length, fecha: hoy }));
-console.log('indice ' + n + ' productos · nuevos ' + nuevos + ' · cambiados ' + cambiados + ' · bajas hoy ' + bajas + ' · vueltos ' + vueltos + ' · ya no listados ' + noListados +
+console.log('indice ' + n + ' productos · nuevos ' + nuevos + ' · cambiados ' + cambiados + ' · por Auto Mercado ' + cruzados + ' · bajas hoy ' + bajas + ' · vueltos ' + vueltos + ' · ya no listados ' + noListados +
             ' · sin información (quedan para la API) ' + fuera + ' · ' + Math.round(fs.statSync(salida).size / 1024) + ' KB');
 `);
