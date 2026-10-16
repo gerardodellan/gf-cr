@@ -1,5 +1,5 @@
 // Caché del cascarón de la app. La API (script.google.com) nunca se cachea.
-const CACHE = 'gf-cr-v6';
+const CACHE = 'gf-cr-v7';
 const ARCHIVOS = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARCHIVOS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(
