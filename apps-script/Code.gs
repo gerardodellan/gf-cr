@@ -13,6 +13,7 @@ const UA = 'GF-CR/0.1 (gerry.dellan@gmail.com)';
 const TTL_DIAS = 30;
 const CACHE_SEG = 3600;
 const MAX_FOTO_BYTES = 1500000;
+const MAX_ALTAS_DIA = 50;
 const HOJAS = {
   productos: ['codigo', 'nombre', 'marca', 'nivel', 'estado', 'motivo', 'ingredientes', 'fuente',
               'fecha_consulta', 'revisado', 'url_foto', 'escaneos'],
@@ -73,6 +74,12 @@ const TERMINOS_INICIALES = [
   ['semolina', 'en', 'ROJO', ''], ['cuscus', 'es', 'ROJO', ''], ['couscous', 'en', 'ROJO', ''],
   ['seitan', 'es', 'ROJO', ''], ['gluten', 'es', 'ROJO', 'salvo dentro de "sin gluten" / "gluten free"'],
   ['bulgur', 'es', 'ROJO', ''], ['brewer\'s yeast', 'en', 'ROJO', ''],
+  ['levadura de cerveza', 'es', 'ROJO', ''], ['cerveza', 'es', 'ROJO', ''], ['beer', 'en', 'ROJO', ''],
+  ['pan rallado', 'es', 'ROJO', ''], ['galleta', 'es', 'ROJO', ''], ['fideos', 'es', 'ROJO', ''],
+  ['farro', 'es', 'ROJO', ''], ['einkorn', 'en', 'ROJO', ''], ['emmer', 'en', 'ROJO', ''], ['durum', 'en', 'ROJO', ''],
+  ['salsa de soya', 'es', 'AMARILLO', 'suele llevar trigo'], ['soy sauce', 'en', 'AMARILLO', ''],
+  ['hydrolyzed vegetable protein', 'en', 'AMARILLO', 'sin origen'], ['modified food starch', 'en', 'AMARILLO', 'sin origen'],
+  ['almidon alimenticio modificado', 'es', 'AMARILLO', 'sin origen'],
   ['avena', 'es', 'AMARILLO', 'sin la frase "sin gluten"'], ['oats', 'en', 'AMARILLO', ''], ['oat', 'en', 'AMARILLO', ''],
   ['harina', 'es', 'AMARILLO', 'sin especie; "harina de maíz/arroz/…" no cuenta'],
   ['flour', 'en', 'AMARILLO', 'sin especie'],
@@ -93,7 +100,7 @@ function doGet(e) {
     const hit = cache.get('p:' + codigo);
     if (hit) return json_(JSON.parse(hit));
     const r = consultar_(codigo);
-    if (r.encontrado) cache.put('p:' + codigo, JSON.stringify(Object.assign({}, r, { nuevo: false })), CACHE_SEG);
+    cache.put('p:' + codigo, JSON.stringify(Object.assign({}, r, { nuevo: false })), r.encontrado ? CACHE_SEG : 900);
     return json_(r);
   } catch (err) {
     return json_({ error: String(err.message || err) });
@@ -127,7 +134,8 @@ function normalizarCodigo_(c) {
   const cuerpo = d.slice(0, -1).reverse();
   const suma = cuerpo.reduce((s, v, i) => s + v * (i % 2 === 0 ? 3 : 1), 0);
   if ((10 - (suma % 10)) % 10 !== d[d.length - 1]) throw new Error('codigo');
-  return c;
+  // una sola forma por producto: EAN-13 con 0 inicial = UPC-A de 12
+  return c.length === 13 && c[0] === '0' ? c.slice(1) : c;
 }
 
 // ---------- consulta ----------
@@ -155,11 +163,11 @@ function consultar_(codigo) {
   };
   if (fila) {
     const prev = filaAObj_(sh, fila);
-    r.escaneos = (Number(prev.escaneos) || 0) + 1;
+    r.escaneos = Number(prev.escaneos) || 1;
     r.url_foto = prev.url_foto || '';
-    sh.getRange(fila, 1, 1, HOJAS.productos.length).setValues([HOJAS.productos.map(k => r[k])]);
+    sh.getRange(fila, 1, 1, HOJAS.productos.length).setValues([HOJAS.productos.map(k => celda_(r[k]))]);
   } else {
-    sh.appendRow(HOJAS.productos.map(k => r[k]));
+    sh.appendRow(HOJAS.productos.map(k => celda_(r[k])));
   }
   return salida_(r, true);
 }
@@ -174,17 +182,23 @@ function salida_(r, recienConsultado) {
 }
 
 function consultarOFF_(codigo) {
-  const campos = 'product_name,product_name_es,brands,ingredients_text_es,ingredients_text,allergens_tags,traces_tags,labels_tags';
+  const campos = 'product_name,product_name_es,brands,ingredients_text_es,ingredients_text_en,ingredients_text,lang,ingredients_tags,allergens_tags,traces_tags,labels_tags';
   const url = 'https://world.openfoodfacts.org/api/v2/product/' + codigo + '.json?fields=' + campos;
   const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, headers: { 'User-Agent': UA } });
-  if (res.getResponseCode() !== 200) return null;
+  const http = res.getResponseCode();
+  // 404 = no existe. Cualquier otro error (429, 5xx) NO es "no encontrado": se avisa como falla de la fuente
+  if (http === 404) return null;
+  if (http !== 200) throw new Error('off');
   const j = JSON.parse(res.getContentText());
   if (j.status !== 1 || !j.product) return null;
   const p = j.product;
   return {
     nombre: p.product_name_es || p.product_name || '',
     marca: (p.brands || '').split(',')[0].trim(),
-    ingredientes: p.ingredients_text_es || p.ingredients_text || '',
+    // texto en otro idioma (fr, de…) sin traducción: no se lee como lista completa; los tags sí valen
+    ingredientes: p.ingredients_text_es || p.ingredients_text_en ||
+      (['es', 'en'].includes(p.lang) ? p.ingredients_text || '' : ''),
+    ingredientes_tags: p.ingredients_tags || [],
     alergenos: p.allergens_tags || [], trazas: p.traces_tags || [], etiquetas: p.labels_tags || [],
   };
 }
@@ -192,21 +206,29 @@ function consultarOFF_(codigo) {
 // ---------- regla (spec §1) ----------
 
 function terminos_() {
+  // la lista del código siempre aplica; la Sheet solo suma términos (borrar una fila de la Sheet no apaga uno base)
+  const base = TERMINOS_INICIALES.map(r => [r[0], r[1], r[2]]);
   const sh = hoja_('prohibidos');
-  if (sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues()
-    .filter(r => r[0]).map(r => ({ termino: plano_(r[0]), nivel: String(r[2]).toUpperCase() }));
+  const extra = sh.getLastRow() < 2 ? [] : sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues();
+  const vistos = {};
+  return base.concat(extra).filter(r => r[0]).map(r => ({ termino: plano_(r[0]), nivel: String(r[2]).toUpperCase().trim() }))
+    .filter(t => !vistos[t.termino + t.nivel] && (vistos[t.termino + t.nivel] = true));
 }
 
 /** Sin tildes, minúsculas. */
 function plano_(s) {
-  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’`´]/g, "'").toLowerCase().trim();
 }
 
-const FRASES_SIN_GLUTEN = ['sin gluten', 'libre de gluten', 'exento de gluten', 'gluten free', 'gluten-free'];
-const FRASES_TRAZAS = ['trazas', 'puede contener', 'fabricado en plantas', 'fabricado en una planta', 'fabricado en lineas',
-  'elaborado en equipos', 'may contain', 'processed in a facility', 'manufactured in a facility', 'shared equipment'];
-const HARINAS_SIN_GLUTEN = ['maiz', 'arroz', 'yuca', 'papa', 'almendra', 'coco', 'garbanzo', 'soya', 'soja', 'platano', 'quinoa',
+const FRASES_SIN_GLUTEN = ['sin gluten', 'libre de gluten', 'exento de gluten', 'no contiene gluten', 'gluten free', 'gluten-free',
+  'glutenfree', 'free from gluten'];
+const NEGACIONES = /sin trigo|no contiene trigo|wheat free|wheat-free/g;
+// placeholders que OFF guarda como si fueran la lista de ingredientes
+const PLACEHOLDER = /ver (la )?etiqueta|see (the )?package|^ingredientes?:?$|^ingredients?:?$/;
+const FRASES_TRAZAS = ['trazas', 'puede contener',
+  '(fabricado|elaborado|procesado|envasado|producido) en (una |la |las |los )?(planta|plantas|fabrica|linea|lineas|equipo|equipos|instalaciones)',
+  'may contain', 'processed in a facility', 'manufactured in a facility', 'made in a facility', 'shared equipment'];
+const HARINAS_SIN_GLUTEN = ['alforfon', 'sorgo', 'amaranto', 'teff', 'buckwheat', 'sorghum', 'amaranth', 'maiz', 'arroz', 'yuca', 'papa', 'almendra', 'coco', 'garbanzo', 'soya', 'soja', 'platano', 'quinoa',
   'corn', 'rice', 'almond', 'coconut', 'potato', 'tapioca', 'chickpea'];
 
 function clasificar_(p, terminos) {
@@ -214,14 +236,18 @@ function clasificar_(p, terminos) {
   // se borran las frases "sin gluten" para que "gluten" no dispare ROJO sobre ellas
   // "gluten friendly" no es declaración reconocida (Salud, jun-2026): se ignora
   let txtLimpio = [...FRASES_SIN_GLUTEN, 'gluten friendly'].reduce((t, f) => t.split(f).join(' '), txt)
-    .replace(/trigo sarraceno|buckwheat/g, ' ');
+    .replace(/trigo sarraceno|buckwheat/g, 'alforfon').replace(/semola de maiz|corn semolina/g, ' ').replace(NEGACIONES, ' ');
   // la cláusula de trazas ("puede contener trazas de trigo.") no es ingrediente: se evalúa en la fila 3
   FRASES_TRAZAS.forEach(f => { txtLimpio = txtLimpio.replace(new RegExp(f + '[^.;]*', 'g'), ' '); });
   const tags = a => (a || []).map(plano_);
   const alerg = tags(p.alergenos), trazas = tags(p.trazas), etiq = tags(p.etiquetas);
-  const completo = txt.length >= 10;
+  const completo = !PLACEHOLDER.test(txt) && (txt.includes(',') || txt.length >= 25);
 
-  // fila 2 — ROJO
+  // fila 2 — ROJO. Los tags de OFF valen aunque el texto venga en otro idioma
+  const TAGS_ROJO = ['en:wheat', 'en:wheat-flour', 'en:whole-wheat', 'en:barley', 'en:rye', 'en:malt', 'en:spelt', 'en:kamut',
+    'en:triticale', 'en:seitan', 'en:gluten', 'en:durum-wheat', 'en:wheat-starch', 'en:barley-malt', 'en:wheat-gluten'];
+  const tagRojo = tags(p.ingredientes_tags).find(t => TAGS_ROJO.includes(t));
+  if (tagRojo) return { nivel: 'F', motivo: 'Ingrediente: ' + tagRojo.replace('en:', '') };
   if (alerg.includes('en:gluten')) return { nivel: 'F', motivo: 'Alérgeno declarado: gluten' };
   for (const t of terminos.filter(t => t.nivel === 'ROJO')) {
     if (palabra_(txtLimpio, t.termino)) return { nivel: 'F', motivo: 'Contiene: ' + t.termino };
@@ -234,7 +260,10 @@ function clasificar_(p, terminos) {
     const re = new RegExp(f + '[^.;]*', 'g');
     let m;
     while ((m = re.exec(txt)) !== null) {
-      const clausula = m[0].replace(/trigo sarraceno|buckwheat/g, ' ');
+      const clausula = m[0].replace(/trigo sarraceno|buckwheat/g, 'alforfon').replace(NEGACIONES, ' ');
+      // OCR sin puntos: la cláusula se come los ingredientes que siguen ("trazas de maní, harina de trigo")
+      if (/(harina|almidon|jarabe|extracto|semola|proteina|salvado|germen) de (trigo|cebada|centeno|malta)|(wheat|barley|rye|malt) (flour|starch|extract|syrup|protein)|contiene:? (trigo|gluten|cebada|centeno)|contains:? (wheat|gluten|barley|rye)/.test(clausula))
+        return { nivel: 'F', motivo: 'Contiene: ' + clausula.trim().slice(0, 60) };
       if (rojos.some(t => palabra_(clausula, t.termino))) return { nivel: 'D', motivo: 'Etiqueta: "' + m[0].trim() + '"' };
     }
   }
@@ -258,7 +287,7 @@ function clasificar_(p, terminos) {
 
 function palabra_(txt, termino) {
   const esc = termino.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp('(^|[^a-z])' + esc + '($|[^a-z])').test(txt);
+  return new RegExp('(^|[^a-z])' + esc + '(e?s)?($|[^a-z])').test(txt);
 }
 
 /** true si TODAS las apariciones de "harina"/"flour" llevan una especie sin gluten. */
@@ -268,7 +297,7 @@ function harinaConEspecie_(txt, termino) {
   while ((m = re.exec(txt)) !== null) {
     alguna = true;
     const especie = termino === 'harina' ? m[3] : m[1];
-    if (!HARINAS_SIN_GLUTEN.includes(especie)) return false;
+    if (!HARINAS_SIN_GLUTEN.includes(especie) && !HARINAS_SIN_GLUTEN.includes(especie.replace(/e?s$/, ''))) return false;
   }
   return alguna;
 }
@@ -277,6 +306,12 @@ function harinaConEspecie_(txt, termino) {
 
 function altaManual_(codigo, b) {
   CacheService.getScriptCache().remove('p:' + codigo);
+  const cache = CacheService.getScriptCache();
+  const kDia = 'altas:' + Utilities.formatDate(new Date(), 'America/Costa_Rica', 'yyyyMMdd');
+  const altas = Number(cache.get(kDia) || 0);
+  if (altas >= MAX_ALTAS_DIA) throw new Error('limite');
+  cache.put(kDia, String(altas + 1), 86400);
+  if (b.foto_base64 && String(b.foto_base64).length > MAX_FOTO_BYTES * 1.4) throw new Error('foto');
   let url = '';
   if (b.foto_base64) {
     const bytes = Utilities.base64Decode(String(b.foto_base64).replace(/^data:[^,]+,/, ''));
@@ -285,7 +320,7 @@ function altaManual_(codigo, b) {
     const f = carpeta.createFile(Utilities.newBlob(bytes, 'image/jpeg', codigo + '-' + Date.now() + '.jpg'));
     url = f.getUrl();
   }
-  const corto = (s, n) => String(s || '').slice(0, n);
+  const corto = (s, n) => celda_(String(s || '').slice(0, n));
   const reg = hoja_('registro');
   reg.appendRow([new Date(), codigo, corto(b.nombre, 120), corto(b.marca, 80), corto(b.etiqueta, 60),
                  corto(b.mensaje, 1000), url, 'pendiente']);
@@ -302,6 +337,11 @@ function altaManual_(codigo, b) {
 }
 
 // ---------- utilidades de hoja ----------
+
+/** Un texto que empieza con = + - @ se escribiría como fórmula: se fuerza a texto. */
+function celda_(v) {
+  return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v;
+}
 
 function hoja_(k) {
   return SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SHEET_ID'))
@@ -342,6 +382,23 @@ function probarRegla() {
     [{ ingredientes: 'Arroz, azúcar. Gluten friendly' }, 'C'],
     [{ ingredientes: 'Harina de arroz, harina de trigo' }, 'F'],
     [{ ingredientes: 'Harina, azúcar' }, 'E'],
+    // revisión Fable 16-oct
+    [{ ingredientes: '', ingredientes_tags: ['en:wheat-flour'] }, 'F'],
+    [{ ingredientes: 'Puede contener trazas de maní, harina de trigo, azúcar' }, 'F'],
+    [{ ingredientes: 'Harina de trigos, sal' }, 'F'],
+    [{ ingredientes: 'Maltas tostadas, lúpulo' }, 'F'],
+    [{ ingredientes: 'Levadura de cerveza, sal' }, 'F'],
+    [{ ingredientes: 'Pan rallado, sal' }, 'F'],
+    [{ ingredientes: 'Rice, brewer’s yeast' }, 'F'],
+    [{ ingredientes: 'Arroz, maíz. No contiene gluten' }, 'B'],
+    [{ ingredientes: 'Arroz, maíz. Sin trigo' }, 'C'],
+    [{ ingredientes: 'Sémola de maíz, sal' }, 'C'],
+    [{ ingredientes: 'Ver etiqueta del empaque' }, 'E'],
+    [{ ingredientes: 'Arroz, sal. Fabricado en una fábrica que procesa trigo' }, 'D'],
+    [{ ingredientes: 'Harina de trigo sarraceno, agua. Sin gluten' }, 'B'],
+    [{ ingredientes: 'Harina de garbanzos, sal' }, 'C'],
+    [{ ingredientes: 'Salsa de soya, azúcar' }, 'E'],
+    [{ ingredientes: 'Rice, salt. May contain soy, contains wheat' }, 'F'],
     [{ ingredientes: 'Cacao, azúcar', alergenos: ['en:gluten'] }, 'F'],
   ];
   casos.forEach(([p, esperado]) => {
