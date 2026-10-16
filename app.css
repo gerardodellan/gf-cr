@@ -140,3 +140,6 @@ form input[type=file] { display: block; margin-top: 10px; font-size: 12px; }
   padding: 0 10px; height: 47px; width: 100%; }
 .drawer nav svg { width: 22px; height: 22px; }
 .drawer nav svg.g { color: #1d8a1d; }
+.sc-manual { position: absolute; left: 12px; right: 12px; bottom: 56px; display: flex; gap: 8px; }
+.sc-manual input { flex: 1; height: 42px; border: 0; border-radius: 6px; font: inherit; font-size: 17px; padding: 0 12px; letter-spacing: 1px; }
+.sc-manual button { background: var(--verde-boton); color: #fff; border-radius: 6px; padding: 0 16px; font-weight: 700; }
