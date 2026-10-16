@@ -23,12 +23,29 @@ let nuevos = 0, cambiados = 0, fuera = 0, vueltos = 0, cruzados = 0;
 const cruce = {};
 try { for (const l of fs.readFileSync(path.join(__dirname, 'data/cruce.jsonl'), 'utf8').trim().split('\\n')) { if (l) { const o = JSON.parse(l); cruce[o.ean] = o.texto; } } } catch {}
 const listados = new Set();
+// lecturas de fotos de etiqueta de la propia tienda (agentes; data/fotos-lecturas.json)
+const fotos = {};
+try { for (const o of JSON.parse(fs.readFileSync(path.join(__dirname, 'data/fotos-lecturas.json'), 'utf8')))
+  if (o.encontrado || (o.alergenos || '').trim()) fotos[o.ean] = o; } catch {}
+let porFoto = 0;
 for (const x of crudo) {
   let txt = x.ingredientes.trim();
   if (x.alergenos && !/^(si|sí|no|n\\/a)$/i.test(x.alergenos.trim())) txt = (txt ? txt + '. ' : '') + 'Alérgenos: ' + x.alergenos;
   let c = clasificar_({ ingredientes: txt, nombre: x.nombre }, T);
   let ean = x.ean;
   if (ean.length === 13 && ean[0] === '0') ean = ean.slice(1);   // misma forma canónica que normalizarCodigo_
+  const fo = fotos[x.ean];
+  if (fo && (fo.legibilidad === 'completa' || c.nivel === 'E')) {
+    // la foto es la etiqueta del mismo producto: completa vale como etiqueta; parcial solo puede subir el riesgo
+    let tf = (fo.ingredientes || '').trim();
+    if ((fo.alergenos || '').trim()) tf += (tf ? '. ' : '') + 'Alérgenos: ' + fo.alergenos.trim();
+    const cf = clasificar_({ ingredientes: tf, nombre: x.nombre }, T);
+    if (cf.motivo !== 'Sin información suficiente') {
+      if (fo.legibilidad === 'completa' || ['F', 'D', 'E'].includes(cf.nivel)) c = { nivel: cf.nivel, motivo: cf.motivo + ' (foto de etiqueta)' };
+      else c = { nivel: 'E', motivo: 'Foto de etiqueta parcial sin ingredientes con gluten; confirmar en el empaque' };
+      porFoto++;
+    }
+  }
   if (c.motivo === 'Sin información suficiente' && cruce[x.ean]) {
     // texto de Auto Mercado cruzado por nombre: solo puede SUBIR el riesgo (F, D, E). Un C/B por cruce baja a E.
     const ca = clasificar_({ ingredientes: cruce[x.ean], nombre: x.nombre }, T);
@@ -51,6 +68,6 @@ const n = Object.keys(p).length, noListados = Object.values(p).filter(x => x[3])
 const sinCambios = !nuevos && !cambiados && !bajas && !vueltos && Object.keys(previo.p).length === n;
 fs.writeFileSync(salida, JSON.stringify({ v: sinCambios ? previo.v : hoy, fuente: 'MaxiPalí', p }));
 fs.writeFileSync(fEstado, JSON.stringify({ recorrido: crudo.length, fecha: hoy }));
-console.log('indice ' + n + ' productos · nuevos ' + nuevos + ' · cambiados ' + cambiados + ' · por Auto Mercado ' + cruzados + ' · bajas hoy ' + bajas + ' · vueltos ' + vueltos + ' · ya no listados ' + noListados +
+console.log('indice ' + n + ' productos · nuevos ' + nuevos + ' · cambiados ' + cambiados + ' · por foto ' + porFoto + ' · por Auto Mercado ' + cruzados + ' · bajas hoy ' + bajas + ' · vueltos ' + vueltos + ' · ya no listados ' + noListados +
             ' · sin información (quedan para la API) ' + fuera + ' · ' + Math.round(fs.statSync(salida).size / 1024) + ' KB');
 `);
