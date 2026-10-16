@@ -75,7 +75,9 @@ const TERMINOS_INICIALES = [
   ['seitan', 'es', 'ROJO', ''], ['gluten', 'es', 'ROJO', 'salvo dentro de "sin gluten" / "gluten free"'],
   ['bulgur', 'es', 'ROJO', ''], ['brewer\'s yeast', 'en', 'ROJO', ''],
   ['levadura de cerveza', 'es', 'ROJO', ''], ['cerveza', 'es', 'ROJO', ''], ['beer', 'en', 'ROJO', ''],
-  ['pan rallado', 'es', 'ROJO', ''], ['galleta', 'es', 'ROJO', ''], ['fideos', 'es', 'ROJO', ''],
+  ['pan rallado', 'es', 'ROJO', ''], ['galleta', 'es', 'AMARILLO', 'sin especie; "galleta de arroz" no cuenta'],
+  ['fideos', 'es', 'AMARILLO', 'sin especie; "fideos de arroz" no cuenta'], ['fideo', 'es', 'AMARILLO', ''],
+  ['almidon', 'es', 'AMARILLO', 'sin origen; "almidón de maíz/papa/yuca" no cuenta'], ['starch', 'en', 'AMARILLO', 'sin origen'],
   ['farro', 'es', 'ROJO', ''], ['einkorn', 'en', 'ROJO', ''], ['emmer', 'en', 'ROJO', ''], ['durum', 'en', 'ROJO', ''],
   ['salsa de soya', 'es', 'AMARILLO', 'suele llevar trigo'], ['soy sauce', 'en', 'AMARILLO', ''],
   ['hydrolyzed vegetable protein', 'en', 'AMARILLO', 'sin origen'], ['modified food starch', 'en', 'AMARILLO', 'sin origen'],
@@ -221,13 +223,15 @@ function plano_(s) {
 }
 
 const FRASES_SIN_GLUTEN = ['sin gluten', 'libre de gluten', 'exento de gluten', 'no contiene gluten', 'gluten free', 'gluten-free',
-  'glutenfree', 'free from gluten'];
+  'glutenfree', 'free from gluten', 'libres de gluten', 'libre de gluten', 'exentos de gluten'];
 const NEGACIONES = /sin trigo|no contiene trigo|wheat free|wheat-free/g;
 // placeholders que OFF guarda como si fueran la lista de ingredientes
-const PLACEHOLDER = /ver (la )?etiqueta|see (the )?package|^ingredientes?:?$|^ingredients?:?$/;
+const PLACEHOLDER = /ver (la )?etiqueta|see (the )?package|^ingredientes?:?$|^ingredients?:?$|por cada 100 ?g|energia total|valor energetico|nutrition facts/;
+// lista cortada ("…; entre otros", "etc."): no es completa, nunca puede dar C
+const CORTADA = /entre otros|\betc\b|y otros ingredientes|among others/;
 const FRASES_TRAZAS = ['trazas', 'puede contener',
   '(fabricado|elaborado|procesado|envasado|producido) en (una |la |las |los )?(planta|plantas|fabrica|linea|lineas|equipo|equipos|instalaciones)',
-  'may contain', 'processed in a facility', 'manufactured in a facility', 'made in a facility', 'shared equipment'];
+  '(equipo|equipos|linea|lineas|planta) que (tambien )?procesa', 'may contain', 'processed in a facility', 'manufactured in a facility', 'made in a facility', 'shared equipment'];
 const HARINAS_SIN_GLUTEN = ['alforfon', 'sorgo', 'amaranto', 'teff', 'buckwheat', 'sorghum', 'amaranth', 'maiz', 'arroz', 'yuca', 'papa', 'almendra', 'coco', 'garbanzo', 'soya', 'soja', 'platano', 'quinoa',
   'corn', 'rice', 'almond', 'coconut', 'potato', 'tapioca', 'chickpea'];
 
@@ -241,7 +245,9 @@ function clasificar_(p, terminos) {
   FRASES_TRAZAS.forEach(f => { txtLimpio = txtLimpio.replace(new RegExp(f + '[^.;]*', 'g'), ' '); });
   const tags = a => (a || []).map(plano_);
   const alerg = tags(p.alergenos), trazas = tags(p.trazas), etiq = tags(p.etiquetas);
-  const completo = !PLACEHOLDER.test(txt) && (txt.includes(',') || txt.length >= 25);
+  // la línea "Alérgenos: …" no es lista de ingredientes: sin lista real no hay C
+  const lista = txt.replace(/(alergenos|allergens|contiene)\s*:[^]*$/, '').replace(/[.;:\s]+$/, '');
+  const completo = !PLACEHOLDER.test(txt) && !CORTADA.test(txt) && lista.length >= 3;
 
   // fila 2 — ROJO. Los tags de OFF valen aunque el texto venga en otro idioma
   const TAGS_ROJO = ['en:wheat', 'en:wheat-flour', 'en:whole-wheat', 'en:barley', 'en:rye', 'en:malt', 'en:spelt', 'en:kamut',
@@ -268,18 +274,21 @@ function clasificar_(p, terminos) {
     }
   }
   // fila 4 — ingrediente de riesgo
-  const dicenSinGluten = FRASES_SIN_GLUTEN.some(f => txt.includes(f));
+  // la declaración vale también en el nombre del producto ("… Libre de Gluten")
+  const nombre = plano_(p.nombre);
+  const dicenSinGluten = FRASES_SIN_GLUTEN.some(f => txt.includes(f) || nombre.includes(f));
   for (const t of terminos.filter(t => t.nivel === 'AMARILLO')) {
     if (!palabra_(txtLimpio, t.termino)) continue;
     if ((t.termino === 'avena' || t.termino.startsWith('oat')) && dicenSinGluten) continue;
-    if ((t.termino === 'harina' || t.termino === 'flour') && harinaConEspecie_(txtLimpio, t.termino)) continue;
+    if (['harina', 'flour', 'almidon', 'starch', 'galleta', 'fideos', 'fideo'].includes(t.termino) && harinaConEspecie_(txtLimpio, t.termino)) continue;
     return { nivel: 'E', motivo: 'Ingrediente de riesgo: ' + t.termino };
   }
   // fila 5 — sello o frase legal, con ingredientes completos
   const certificado = etiq.some(e => e.includes('certified-gluten-free'));
   const etiquetaGF = etiq.includes('en:gluten-free') || etiq.includes('en:no-gluten') || dicenSinGluten;
   if (completo && certificado) return { nivel: 'A', motivo: 'Sello sin gluten certificado' };
-  if (completo && etiquetaGF) return { nivel: 'B', motivo: 'Etiquetado "sin gluten"' };
+  // B no exige lista completa: la declaración "sin gluten" (RTCR 457) es del fabricante; solo exige que no haya ROJO ni trazas
+  if (etiquetaGF && !PLACEHOLDER.test(txt)) return { nivel: 'B', motivo: 'Etiquetado "sin gluten"' };
   // fila 6
   if (completo) return { nivel: 'C', motivo: 'Sin ingredientes con gluten' };
   return { nivel: 'E', motivo: 'Sin información suficiente' };
@@ -292,11 +301,12 @@ function palabra_(txt, termino) {
 
 /** true si TODAS las apariciones de "harina"/"flour" llevan una especie sin gluten. */
 function harinaConEspecie_(txt, termino) {
-  const re = termino === 'harina' ? /harina(s)?( de| integral de)? ([a-z]+)/g : /([a-z]+) flour/g;
+  const enIngles = termino === 'flour' || termino === 'starch';
+  const re = enIngles ? new RegExp('([a-z]+) ' + termino, 'g') : new RegExp(termino + '(e?s)?( modificado)?( de| integral de)? ([a-z]+)', 'g');
   let m, alguna = false;
   while ((m = re.exec(txt)) !== null) {
     alguna = true;
-    const especie = termino === 'harina' ? m[3] : m[1];
+    const especie = enIngles ? m[1] : m[4];
     if (!HARINAS_SIN_GLUTEN.includes(especie) && !HARINAS_SIN_GLUTEN.includes(especie.replace(/e?s$/, ''))) return false;
   }
   return alguna;
@@ -399,6 +409,17 @@ function probarRegla() {
     [{ ingredientes: 'Harina de garbanzos, sal' }, 'C'],
     [{ ingredientes: 'Salsa de soya, azúcar' }, 'E'],
     [{ ingredientes: 'Rice, salt. May contain soy, contains wheat' }, 'F'],
+    [{ ingredientes: 'Azúcar, agua, aceite vegetal, mora; entre otros' }, 'E'],
+    [{ ingredientes: 'Harina de trigo, cacao, azúcar; entre otros' }, 'F'],
+    [{ ingredientes: 'Maíz, sal; entre otros. Sin gluten' }, 'B'],
+    [{ ingredientes: 'Alérgenos: Contiene huevo; puede contener soya' }, 'E'],
+    [{ ingredientes: 'Tomate, agua, azúcar, almidón, sal' }, 'E'],
+    [{ ingredientes: 'Tomate, agua, almidón de maíz, sal' }, 'C'],
+    [{ ingredientes: 'Arroz' }, 'C'],
+    [{ ingredientes: 'Por cada 100g, energía total 550 kJ' }, 'E'],
+    [{ ingredientes: 'Gelatina, color. Hecho en equipo que procesa gluten' }, 'D'],
+    [{ ingredientes: 'Fideos de arroz, sal, cebolla' }, 'C'],
+    [{ ingredientes: 'Harina de maíz, almidón de maíz', nombre: 'Palitos de maíz libres de gluten' }, 'B'],
     [{ ingredientes: 'Cacao, azúcar', alergenos: ['en:gluten'] }, 'F'],
   ];
   casos.forEach(([p, esperado]) => {

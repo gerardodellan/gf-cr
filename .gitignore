@@ -1,3 +1,4 @@
 apps-script/.clasp.json
 android/gfcr.keystore
 android/.pw
+tests/data/
