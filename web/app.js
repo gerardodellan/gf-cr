@@ -266,8 +266,16 @@
   }
   $('#btn-cancel').onclick = () => history.back();  // popstate cierra el escáner
   $('#btn-manual').onclick = () => {
-    const c = (prompt('Código de barras (números):') || '').replace(/\D/g, '');
+    const f = $('#sc-manual');
+    f.hidden = !f.hidden;
+    if (!f.hidden) $('#sc-input').focus();
+  };
+  $('#sc-manual').onsubmit = e => {
+    e.preventDefault();
+    const c = $('#sc-input').value.replace(/\D/g, '');
     if (!c) return;
+    $('#sc-input').value = '';
+    $('#sc-manual').hidden = true;
     cerrarEscaner();
     consultar(c);
   };
@@ -304,5 +312,8 @@
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   mostrar('history', { push: false });
   if (!CFG.API) { alert('Falta configurar la API (config.js).'); return; }
-  abrirEscaner();
+  // ?codigo=… abre directo el resultado (pruebas y enlaces compartidos)
+  const directo = new URLSearchParams(location.search).get('codigo');
+  if (directo) consultar(directo.replace(/\D/g, ''));
+  else abrirEscaner();
 })();
