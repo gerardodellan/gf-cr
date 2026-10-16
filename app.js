@@ -214,6 +214,7 @@
 
   async function abrirEscaner() {
     cerrarMenu();
+    if ($('#v-scan').hidden) history.pushState({ scan: 1 }, '');  // "atrás" cierra el escáner, no la app
     $('#v-scan').hidden = false;
     $('#sc-err').textContent = '';
     if (!('BarcodeDetector' in window)) {
@@ -263,7 +264,7 @@
     stream = null;
     $('#v-scan').hidden = true;
   }
-  $('#btn-cancel').onclick = () => { cerrarEscaner(); if (!actual) mostrar('history'); };
+  $('#btn-cancel').onclick = () => history.back();  // popstate cierra el escáner
   $('#btn-manual').onclick = () => {
     const c = (prompt('Código de barras (números):') || '').replace(/\D/g, '');
     if (!c) return;
