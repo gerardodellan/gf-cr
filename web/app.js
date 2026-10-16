@@ -129,7 +129,7 @@
     $('#r-expl').textContent = n.expl;
     $('#r-expl').style.display = n.expl ? 'block' : 'none';
     $('#r-motivo').textContent = p.motivo || '—';
-    const fuente = { OFF: 'Open Food Facts', manual: 'Agregado a mano', sello: 'Lista de sello' }[p.fuente] || p.fuente || '—';
+    const fuente = { MP: 'MaxiPalí', OFF: 'Open Food Facts', manual: 'Agregado a mano', sello: 'Lista de sello' }[p.fuente] || p.fuente || '—';
     $('#r-fuente').textContent = fuente + (p.fecha_consulta ? ' · ' + p.fecha_consulta : '') + (p.revisado ? ' · revisado' : ' · sin revisar');
     $('#r-codigo').textContent = p.codigo;
   }

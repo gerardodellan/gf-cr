@@ -150,17 +150,32 @@ function consultar_(codigo) {
     const r = filaAObj_(sh, fila);
     sh.getRange(fila, HOJAS.productos.indexOf('escaneos') + 1).setValue((Number(r.escaneos) || 0) + 1);
     const fresco = r.fecha_consulta && (ahora - new Date(r.fecha_consulta)) / 864e5 < TTL_DIAS;
-    if (r.revisado === true || r.fuente !== 'OFF' || fresco) return salida_(r, false);
+    if (r.revisado === true || !['OFF', 'MP'].includes(r.fuente) || fresco) return salida_(r, false);
   }
-  const off = consultarOFF_(codigo);
-  if (!off) {
+  // Orden de fuentes (decisión de Gerardo, 16-oct): la tienda local primero; Open Food Facts solo si la tienda
+  // no tiene el producto o su texto no alcanza para clasificar (nivel E por falta de información).
+  const T = terminos_();
+  let fuente = 'MP', prod = consultarMaxiPali_(codigo), c = prod && clasificar_(prod, T);
+  if (!prod || (c.nivel === 'E' && c.motivo === 'Sin información suficiente')) {
+    let off = null;
+    try { off = consultarOFF_(codigo); } catch (err) { if (!prod) throw err; }
+    if (off) {
+      const cOff = clasificar_(off, T);
+      // con texto de la tienda, OFF solo reemplaza si da más información (no un "sin información" igual)
+      if (!prod || cOff.motivo !== 'Sin información suficiente') {
+        prod = { ...off, nombre: (prod && prod.nombre) || off.nombre, marca: (prod && prod.marca) || off.marca };
+        c = cOff; fuente = 'OFF';
+      }
+    }
+  }
+  if (!prod) {
     if (fila) return salida_(filaAObj_(sh, fila), false);
     return { codigo: codigo, encontrado: false };
   }
-  const c = clasificar_(off, terminos_());
+  const off = prod;
   const r = {
     codigo: codigo, nombre: off.nombre, marca: off.marca, nivel: c.nivel, estado: NIVEL_ESTADO[c.nivel],
-    motivo: c.motivo, ingredientes: off.ingredientes, fuente: 'OFF', fecha_consulta: ahora,
+    motivo: c.motivo, ingredientes: off.ingredientes, fuente: fuente, fecha_consulta: ahora,
     revisado: false, url_foto: '', escaneos: 1,
   };
   if (fila) {
@@ -181,6 +196,26 @@ function salida_(r, recienConsultado) {
     fecha_consulta: r.fecha_consulta ? Utilities.formatDate(new Date(r.fecha_consulta), 'America/Costa_Rica', 'dd-MM-yyyy') : '',
     nuevo: recienConsultado,
   };
+}
+
+/** MaxiPalí (VTEX público, Walmart CR). Los UPC-A se guardan con 0 inicial (13 dígitos). */
+function consultarMaxiPali_(codigo) {
+  const variantes = codigo.length === 12 ? ['0' + codigo, codigo] : [codigo];
+  for (const ean of variantes) {
+    const url = 'https://www.maxipali.co.cr/api/catalog_system/pub/products/search?fq=alternateIds_Ean:' + ean + '&sc=3';
+    let res;
+    try { res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, headers: { 'User-Agent': UA } }); } catch (e) { return null; }
+    if (res.getResponseCode() !== 200 && res.getResponseCode() !== 206) return null;
+    const d = JSON.parse(res.getContentText());
+    if (!d.length) continue;
+    const p = d[0];
+    const campo = k => (Array.isArray(p[k]) ? p[k].join('; ') : p[k] || '').trim();
+    let txt = campo('Listado de ingredientes');
+    const alerg = campo('Productos alérgenos');
+    if (alerg && !/^(si|sí|no|n\/a)$/i.test(alerg)) txt = (txt ? txt + '. ' : '') + 'Alérgenos: ' + alerg;
+    return { nombre: p.productName || '', marca: p.brand || '', ingredientes: txt };
+  }
+  return null;
 }
 
 function consultarOFF_(codigo) {
