@@ -11,6 +11,7 @@
 const TOKEN = 'IKtImWFs97m3';
 const UA = 'GF-CR/0.1 (gerry.dellan@gmail.com)';
 const TTL_DIAS = 30;
+const CACHE_SEG = 3600;
 const MAX_FOTO_BYTES = 1500000;
 const HOJAS = {
   productos: ['codigo', 'nombre', 'marca', 'nivel', 'estado', 'motivo', 'ingredientes', 'fuente',
@@ -86,7 +87,14 @@ function doGet(e) {
     const p = e.parameter || {};
     checkToken_(p.t);
     const codigo = normalizarCodigo_(p.codigo);
-    return json_(consultar_(codigo));
+    // caché en memoria: abrir la Sheet cuesta ~4 s; un acierto acá responde sin tocarla.
+    // Costo aceptado: un acierto no suma al contador `escaneos`, y una revisión a mano tarda hasta CACHE_SEG en verse.
+    const cache = CacheService.getScriptCache();
+    const hit = cache.get('p:' + codigo);
+    if (hit) return json_(JSON.parse(hit));
+    const r = consultar_(codigo);
+    if (r.encontrado) cache.put('p:' + codigo, JSON.stringify(Object.assign({}, r, { nuevo: false })), CACHE_SEG);
+    return json_(r);
   } catch (err) {
     return json_({ error: String(err.message || err) });
   }
@@ -268,6 +276,7 @@ function harinaConEspecie_(txt, termino) {
 // ---------- alta manual ----------
 
 function altaManual_(codigo, b) {
+  CacheService.getScriptCache().remove('p:' + codigo);
   let url = '';
   if (b.foto_base64) {
     const bytes = Utilities.base64Decode(String(b.foto_base64).replace(/^data:[^,]+,/, ''));
