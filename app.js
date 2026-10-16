@@ -90,9 +90,32 @@
     });
   }
 
+  // ---------- índice local (alimentos de MaxiPalí, se regenera cada noche) ----------
+  let indice = null;
+  fetch('datos/indice.json').then(r => r.ok ? r.json() : null).then(j => { indice = j; }).catch(() => {});
+  const canon = c => (c.length === 13 && c[0] === '0' ? c.slice(1) : c);
+  function buscarIndice(codigo) {
+    const x = indice && indice.p[canon(codigo)];
+    if (!x) return null;
+    const fecha = f => f.split('-').reverse().join('-');
+    // x[3] = '' si MaxiPalí lo lista hoy; si no, la fecha desde la que no lo lista (el dato de gluten sigue valiendo)
+    return { codigo: canon(codigo), encontrado: true, nombre: x[0], marca: '', nivel: x[1], motivo: x[2],
+             fuente: x[3] ? 'MP-baja' : 'MP', fecha_consulta: x[3] ? 'ya no lo lista desde ' + fecha(x[3]) : fecha(indice.v), revisado: false };
+  }
+
   // ---------- API ----------
   async function consultar(codigo, { silencioso = false } = {}) {
     codigoActual = codigo;
+    // índice primero: respuesta instantánea y sin señal; después la API refresca en silencio
+    // (trae una revisión manual o un dato más nuevo si lo hay)
+    const local = !silencioso && buscarIndice(codigo);
+    if (local) {
+      agregarHist(local);
+      pintarResultado(local);
+      mostrar('result');
+      if (navigator.onLine) consultar(codigo, { silencioso: true });
+      return;
+    }
     if (!silencioso) mostrar('loading');
     try {
       const ctl = new AbortController();
@@ -107,7 +130,8 @@
         return mostrar('notfound');
       }
       agregarHist(j);
-      pintarResultado(j);
+      // en silencio solo se repinta si el usuario sigue mirando ese producto
+      if (!silencioso || (actual === 'result' && producto && canon(producto.codigo) === canon(j.codigo))) pintarResultado(j);
       if (!silencioso) mostrar('result');
     } catch (err) {
       if (silencioso) return;
@@ -129,7 +153,7 @@
     $('#r-expl').textContent = n.expl;
     $('#r-expl').style.display = n.expl ? 'block' : 'none';
     $('#r-motivo').textContent = p.motivo || '—';
-    const fuente = { MP: 'MaxiPalí', OFF: 'Open Food Facts', manual: 'Agregado a mano', sello: 'Lista de sello' }[p.fuente] || p.fuente || '—';
+    const fuente = { MP: 'MaxiPalí', 'MP-baja': 'MaxiPalí', OFF: 'Open Food Facts', manual: 'Agregado a mano', sello: 'Lista de sello' }[p.fuente] || p.fuente || '—';
     $('#r-fuente').textContent = fuente + (p.fecha_consulta ? ' · ' + p.fecha_consulta : '') + (p.revisado ? ' · revisado' : ' · sin revisar');
     $('#r-codigo').textContent = p.codigo;
   }
