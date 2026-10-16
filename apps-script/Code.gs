@@ -259,7 +259,8 @@ function plano_(s) {
 
 const FRASES_SIN_GLUTEN = ['sin gluten', 'libre de gluten', 'exento de gluten', 'no contiene gluten', 'gluten free', 'gluten-free',
   'glutenfree', 'free from gluten', 'libres de gluten', 'libre de gluten', 'exentos de gluten'];
-const NEGACIONES = /sin trigo|no contiene trigo|wheat free|wheat-free/g;
+// negaciones: la palabra prohibida aparece pero negada ("libre gluten: sí", "ni gluten", "sin trigo")
+const NEGACIONES = /sin trigo|no contiene trigo|wheat free|wheat-free|libre( de)? gluten:? ?(si|yes)?|\bni (trigo|gluten)\b|sin (declaracion de )?(alergenos ni )?gluten/g;
 // placeholders que OFF guarda como si fueran la lista de ingredientes
 const PLACEHOLDER = /ver (la )?etiqueta|see (the )?package|^ingredientes?:?$|^ingredients?:?$|por cada 100 ?g|energia total|valor energetico|nutrition facts/;
 // lista cortada ("…; entre otros", "etc."): no es completa, nunca puede dar C
@@ -444,6 +445,8 @@ function probarRegla() {
     [{ ingredientes: 'Harina de garbanzos, sal' }, 'C'],
     [{ ingredientes: 'Salsa de soya, azúcar' }, 'E'],
     [{ ingredientes: 'Rice, salt. May contain soy, contains wheat' }, 'F'],
+    [{ ingredientes: 'Alérgenos: Artículo Libre Gluten: Sí' }, 'E'],
+    [{ ingredientes: 'Tilo, menta, anís. Alérgenos: sin declaración de alérgenos ni gluten' }, 'C'],
     [{ ingredientes: 'Azúcar, agua, aceite vegetal, mora; entre otros' }, 'E'],
     [{ ingredientes: 'Harina de trigo, cacao, azúcar; entre otros' }, 'F'],
     [{ ingredientes: 'Maíz, sal; entre otros. Sin gluten' }, 'B'],
