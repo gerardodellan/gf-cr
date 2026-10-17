@@ -3,6 +3,7 @@
 // un segundo modelo (indexer/leer_fotos.py --salida data/verificacion-b.jsonl) y el índice solo
 // mantiene el B si los dos lo leyeron. Ver proyecto-escaner-sin-gluten §Llenado y validación.
 const fs = require('fs'), path = require('path');
+const { textoLectura_ } = require('./lectura');
 global.Logger = { log: () => {} };
 eval(fs.readFileSync(path.join(__dirname, '../apps-script/Code.gs'), 'utf8') + `
 const T = TERMINOS_INICIALES.map(r => ({ termino: plano_(r[0]), nivel: r[2] }));
@@ -14,8 +15,7 @@ for (const l of fs.readFileSync(path.join(__dirname, 'data/lecturas-fotos.jsonl'
   if (!l) continue;
   const o = JSON.parse(l), r = o.lectura;
   if (!r || r.legibilidad !== 'completa') continue;   // un B parcial ya baja a E por la regla del índice
-  let t = (r.ingredientes || '').trim();
-  if ((r.alergenos || '').trim()) t += (t ? '. ' : '') + 'Alérgenos: ' + r.alergenos.trim();
+  const t = textoLectura_(r);
   const c = clasificar_({ ingredientes: t, nombre: (crudo[o.ean] || {}).nombre || '' }, T);
   if (c.nivel === 'B') out.push(o.ean);
 }

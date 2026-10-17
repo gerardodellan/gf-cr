@@ -4,6 +4,7 @@
 //   (puede estar en otro súper). Formato: p[ean] = [nombre, nivel, motivo, '' si MaxiPalí lo lista | AAAA-MM-DD desde que no lo lista].
 // - El archivo solo cambia si cambia el contenido: una noche sin novedades no genera commit.
 const fs = require('fs'), path = require('path');
+const { texto_, textoLectura_ } = require('./lectura');
 global.Logger = { log: () => {} };
 eval(fs.readFileSync(path.join(__dirname, '../apps-script/Code.gs'), 'utf8') + `
 const T = TERMINOS_INICIALES.map(r => ({ termino: plano_(r[0]), nivel: r[2] }));
@@ -30,10 +31,10 @@ const listados = new Set();
 const fotos = {};
 try { for (const l of fs.readFileSync(path.join(__dirname, 'data/lecturas-fotos.jsonl'), 'utf8').trim().split('\\n')) {
   if (!l) continue; const o = JSON.parse(l); const r = o.lectura;
-  if (r && (r.encontrado || (r.alergenos || '').trim())) fotos[o.ean] = r;
+  if (r && (r.encontrado || texto_(r.alergenos).trim())) fotos[o.ean] = r;
 } } catch {}
 try { for (const o of JSON.parse(fs.readFileSync(path.join(__dirname, 'data/fotos-lecturas.json'), 'utf8')))
-  if (o.encontrado || (o.alergenos || '').trim()) fotos[o.ean] = o; } catch {}
+  if (o.encontrado || texto_(o.alergenos).trim()) fotos[o.ean] = o; } catch {}
 // Verificación de los B: un B es el único nivel que le dice a Yin "comelo". Un segundo modelo
 // (data/verificacion-b.jsonl, indexer/candidatos_b.js) releyó las mismas fotos; el B se mantiene
 // solo si los dos leyeron la frase. Si no coinciden, baja a E "confirmar en el empaque".
@@ -44,9 +45,7 @@ try { for (const l of fs.readFileSync(path.join(__dirname, 'data/verificacion-b.
 const confirmaB = (ean, nombre) => {
   const r = verifB[ean];
   if (!r) return false;
-  let t = (r.ingredientes || '').trim();
-  if ((r.alergenos || '').trim()) t += (t ? '. ' : '') + 'Alérgenos: ' + r.alergenos.trim();
-  return clasificar_({ ingredientes: t, nombre: nombre }, T).nivel === 'B';
+  return clasificar_({ ingredientes: textoLectura_(r), nombre: nombre }, T).nivel === 'B';
 };
 let porFoto = 0, bSinConfirmar = 0;
 for (const x of crudo) {
@@ -58,24 +57,23 @@ for (const x of crudo) {
   const fo = fotos[x.ean];
   if (fo && (fo.legibilidad === 'completa' || c.nivel === 'E')) {
     // la foto es la etiqueta del mismo producto: completa vale como etiqueta; parcial solo puede subir el riesgo
-    let tf = (fo.ingredientes || '').trim();
-    if ((fo.alergenos || '').trim()) tf += (tf ? '. ' : '') + 'Alérgenos: ' + fo.alergenos.trim();
-    const cf = clasificar_({ ingredientes: tf, nombre: x.nombre }, T);
+    const cf = clasificar_({ ingredientes: textoLectura_(fo), nombre: x.nombre }, T);
     if (cf.motivo !== 'Sin información suficiente') {
       let cn;
       if (fo.legibilidad === 'completa' || ['F', 'D', 'E'].includes(cf.nivel)) cn = { nivel: cf.nivel, motivo: cf.motivo + ' (foto de etiqueta)' };
       else cn = { nivel: 'E', motivo: 'Foto de etiqueta parcial sin ingredientes con gluten; confirmar en el empaque' };
-      // La foto NUNCA baja el riesgo que ya declaró el catálogo de la tienda (16-oct). Los 3 casos del
-      // piloto donde pasaba (achiote, tortilla de maíz, yuquitas) eran errores del catálogo —verificados
-      // mirando la foto—, pero la foto del catálogo puede ser vieja y la ficha del proveedor nueva.
-      // Bajarlo solo lo hace una revisión manual con el empaque en la mano (columna revisado en la Sheet).
       // el B solo sobrevive con la confirmación del segundo modelo
       if (cn.nivel === 'B' && !confirmaB(x.ean, x.nombre)) {
         cn = { nivel: 'E', motivo: 'La foto dice "sin gluten" pero un segundo modelo no lo confirmó; revisar el empaque' };
         bSinConfirmar++;
       }
+      // Cuando el catálogo DECLARA gluten o trazas (F o D), la foto no puede bajar el riesgo (16-oct).
+      // Los 3 casos del piloto donde pasaba (achiote, tortilla de maíz, yuquitas) eran errores del
+      // catálogo —verificados mirando la foto—, pero la foto puede ser de un empaque viejo y la ficha
+      // del proveedor nueva. Solo una revisión con el empaque en la mano lo baja (revisado en la Sheet).
+      // Un C o E del catálogo no declara nada: ahí la foto sí puede dar B, y además pasa por confirmaB.
       const R = { A: 0, B: 1, C: 2, D: 3, E: 4, F: 5 };
-      if (c.motivo !== 'Sin información suficiente' && R[cn.nivel] < R[c.nivel])
+      if (['F', 'D'].includes(c.nivel) && R[cn.nivel] < R[c.nivel])
         cn = { nivel: c.nivel, motivo: c.motivo + ' (la foto no lo declara; gana el mayor riesgo)' };
       c = cn;
       porFoto++;

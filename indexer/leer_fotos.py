@@ -56,7 +56,7 @@ def leer(ean, modelo, proveedor):
     pedido = {
         'model': modelo,
         'messages': [{'role': 'user', 'content': contenido}],
-        'max_tokens': 3000,
+        'max_tokens': 6000,
         'temperature': 0,
         'reasoning': {'enabled': False},
         'provider': {'order': [proveedor], 'allow_fallbacks': False},
@@ -76,6 +76,9 @@ def leer(ean, modelo, proveedor):
         fila['error'] = str(d['error'])[:300]
         return fila
     texto = (d['choices'][0]['message'].get('content') or '').strip()
+    # algunos modelos devuelven el JSON dentro de ```json ... ``` y a veces sin cerrar el bloque
+    texto = re.sub(r'^```(?:json)?\s*', '', texto)
+    texto = re.sub(r'\s*```$', '', texto).strip()
     m = re.search(r'\{.*\}', texto, re.S)
     try:
         fila['lectura'] = json.loads(m.group(0)) if m else None

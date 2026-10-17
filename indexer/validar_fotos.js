@@ -11,6 +11,7 @@
 //
 // Uso: node indexer/validar_fotos.js [--json salida.json]
 const fs = require('fs'), path = require('path');
+const { texto_, textoLectura_ } = require('./lectura');
 global.Logger = { log: () => {} };
 const ORDEN = { A: 0, B: 1, C: 2, D: 3, E: 4, F: 5 };   // riesgo creciente
 
@@ -33,11 +34,7 @@ const nivelWeb = x => {
   if (x.alergenos && !/^(si|sí|no|n\\/a)$/i.test(x.alergenos.trim())) t = (t ? t + '. ' : '') + 'Alérgenos: ' + x.alergenos;
   return clasificar_({ ingredientes: t, nombre: x.nombre }, T);
 };
-const nivelFoto = (fo, nombre) => {
-  let t = (fo.ingredientes || '').trim();
-  if ((fo.alergenos || '').trim()) t += (t ? '. ' : '') + 'Alérgenos: ' + fo.alergenos.trim();
-  return clasificar_({ ingredientes: t, nombre: nombre }, T);
-};
+const nivelFoto = (fo, nombre) => clasificar_({ ingredientes: textoLectura_(fo), nombre: nombre }, T);
 
 const filas = [];
 const c = { igual: 0, llena_hueco: 0, sube_riesgo: 0, peligroso: 0, foto_sin_dato: 0, sin_crudo: 0 };
@@ -60,7 +57,7 @@ for (const { ean, lectura, origen } of lecturas) {
   filas.push({ ean, caso, nombre: x.nombre, web: hueco ? '-' : cw.nivel, motivo_web: cw.motivo,
                foto: cf.nivel, final: fin.nivel, motivo_final: fin.motivo, legibilidad: lectura.legibilidad, origen,
                ingredientes_web: (x.ingredientes || '').slice(0, 160), alergenos_web: x.alergenos || '',
-               ingredientes_foto: (lectura.ingredientes || '').slice(0, 200), alergenos_foto: lectura.alergenos || '' });
+               ingredientes_foto: texto_(lectura.ingredientes).slice(0, 200), alergenos_foto: texto_(lectura.alergenos) });
 }
 const porNivel = {};
 for (const f of filas.filter(f => f.caso === 'llena_hueco')) porNivel[f.final] = (porNivel[f.final] || 0) + 1;
