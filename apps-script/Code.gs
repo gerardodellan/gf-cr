@@ -100,7 +100,7 @@ function doGet(e) {
     // Costo aceptado: un acierto no suma al contador `escaneos`, y una revisión a mano tarda hasta CACHE_SEG en verse.
     const cache = CacheService.getScriptCache();
     const hit = cache.get('p2:' + codigo);
-    if (hit) return json_(JSON.parse(hit));
+    if (hit) return json_(Object.assign(JSON.parse(hit), { codigo: codigo }));
     const r = consultar_(codigo);
     r.codigo = codigo;  // la fila puede tener el código sin el 0 inicial
     cache.put('p2:' + codigo, JSON.stringify(Object.assign({}, r, { nuevo: false })), r.encontrado ? CACHE_SEG : 900);
