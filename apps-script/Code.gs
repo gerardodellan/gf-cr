@@ -16,9 +16,9 @@ const MAX_FOTO_BYTES = 1500000;
 const MAX_ALTAS_DIA = 50;
 const HOJAS = {
   productos: ['codigo', 'nombre', 'marca', 'nivel', 'estado', 'motivo', 'ingredientes', 'fuente',
-              'fecha_consulta', 'revisado', 'url_foto', 'escaneos'],
+              'fecha_consulta', 'revisado', 'url_foto', 'escaneos', 'corregido_por', 'fecha_correccion'],
   prohibidos: ['termino', 'idioma', 'nivel', 'nota'],
-  registro: ['fecha', 'codigo', 'nombre', 'marca', 'etiqueta', 'mensaje', 'url_foto', 'estado_revision'],
+  registro: ['fecha', 'codigo', 'nombre', 'marca', 'etiqueta', 'mensaje', 'url_foto', 'estado_revision', 'por', 'dispositivo'],
 };
 const NOMBRE_HOJA = { productos: 'Productos_CR', prohibidos: 'Ingredientes_Prohibidos', registro: 'Registro_Manual' };
 
@@ -193,8 +193,9 @@ function consultar_(codigo) {
 function salida_(r, recienConsultado) {
   return {
     codigo: String(r.codigo), encontrado: true, nombre: r.nombre, marca: r.marca, nivel: r.nivel,
-    estado: r.estado, motivo: r.motivo, fuente: r.fuente, revisado: r.revisado === true,
+    estado: r.estado, motivo: r.motivo, fuente: r.fuente, revisado: r.revisado === true, por: r.corregido_por || '',
     fecha_consulta: r.fecha_consulta ? Utilities.formatDate(new Date(r.fecha_consulta), 'America/Costa_Rica', 'dd-MM-yyyy') : '',
+    fecha_correccion: r.fecha_correccion ? Utilities.formatDate(new Date(r.fecha_correccion), 'America/Costa_Rica', 'dd-MM-yyyy HH:mm') : '',
     nuevo: recienConsultado,
   };
 }
@@ -380,10 +381,13 @@ function altaManual_(codigo, b) {
   }
   const corto = (s, n) => celda_(String(s || '').slice(0, n));
   const aplicar = b.aplicar === true && ETIQUETA_NIVEL[b.etiqueta];
+  const por = corto(b.por, 40), dispositivo = corto(b.dispositivo, 60);
   const reg = hoja_('registro');
+  encabezados_(reg, 'registro');
   reg.appendRow([new Date(), codigoTexto_(codigo), corto(b.nombre, 120), corto(b.marca, 80), corto(b.etiqueta, 60),
-                 corto(b.mensaje, 1000), url, aplicar ? 'aplicado' : 'pendiente']);
+                 corto(b.mensaje, 1000), url, aplicar ? 'aplicado' : 'pendiente', por, dispositivo]);
   const sh = hoja_('productos');
+  encabezados_(sh, 'productos');
   const fila = buscarFila_(sh, codigo);
   if (aplicar) {
     const [nivel, motivo] = ETIQUETA_NIVEL[b.etiqueta];
@@ -392,6 +396,7 @@ function altaManual_(codigo, b) {
       codigo: codigo, nombre: corto(b.nombre, 120) || prev.nombre || '', marca: corto(b.marca, 80) || prev.marca || '',
       nivel: nivel, estado: NIVEL_ESTADO[nivel], motivo: 'Corregido a mano: ' + motivo, fuente: 'manual',
       fecha_consulta: new Date(), revisado: true, url_foto: url || prev.url_foto || '', escaneos: Number(prev.escaneos) || 0,
+      corregido_por: por + (dispositivo ? ' (' + dispositivo + ')' : ''), fecha_correccion: new Date(),
     });
     const valores = [HOJAS.productos.map(k => k === 'codigo' ? codigoTexto_(codigo) : celda_(r[k] === undefined ? '' : r[k]))];
     if (fila) sh.getRange(fila, 1, 1, HOJAS.productos.length).setValues(valores);
@@ -403,7 +408,8 @@ function altaManual_(codigo, b) {
     sh.appendRow(HOJAS.productos.map(k => ({
       codigo: codigoTexto_(codigo), nombre: corto(b.nombre, 120), marca: corto(b.marca, 80), nivel: 'E', estado: 'AMARILLO',
       motivo: 'Agregado a mano, sin revisar', ingredientes: '', fuente: 'manual', fecha_consulta: new Date(),
-      revisado: false, url_foto: url, escaneos: 0,
+      revisado: false, url_foto: url, escaneos: 0, corregido_por: por + (dispositivo ? ' (' + dispositivo + ')' : ''),
+      fecha_correccion: new Date(),
     })[k]));
   }
   return { ok: true };
@@ -414,6 +420,12 @@ function altaManual_(codigo, b) {
 /** Un texto que empieza con = + - @ se escribiría como fórmula: se fuerza a texto. */
 function celda_(v) {
   return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v;
+}
+
+/** Agrega a la fila 1 las columnas nuevas de HOJAS (las hojas existentes se crearon con menos). */
+function encabezados_(sh, k) {
+  const n = HOJAS[k].length;
+  if (sh.getLastColumn() < n) sh.getRange(1, 1, 1, n).setValues([HOJAS[k]]);
 }
 
 function hoja_(k) {

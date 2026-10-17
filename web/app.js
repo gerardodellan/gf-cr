@@ -170,7 +170,7 @@
     $('#r-expl').style.display = n.expl ? 'block' : 'none';
     $('#r-motivo').textContent = p.motivo || '—';
     const fuente = { MP: 'MaxiPalí', 'MP-baja': 'MaxiPalí', OFF: 'Open Food Facts', manual: 'Agregado a mano', sello: 'Lista de sello' }[p.fuente] || p.fuente || '—';
-    $('#r-fuente').textContent = fuente + (p.fecha_consulta ? ' · ' + p.fecha_consulta : '') + (p.revisado ? ' · revisado' : ' · sin revisar');
+    $('#r-fuente').textContent = fuente + (p.por ? ' por ' + p.por : '') + (p.fecha_correccion ? ' · ' + p.fecha_correccion : p.fecha_consulta ? ' · ' + p.fecha_consulta : '') + (p.revisado ? ' · revisado' : ' · sin revisar');
     $('#r-codigo').textContent = p.codigo;
   }
 
@@ -197,6 +197,7 @@
     $('#f-send').disabled = false;
     $('#f-codigo').textContent = codigoActual;
     f.aplicar.checked = true;
+    try { f.por.value = localStorage.getItem('gf-nombre') || ''; } catch {}
     if (producto && producto.codigo === codigoActual) {
       f.nombre.value = producto.nombre || '';
       f.marca.value = producto.marca || '';
@@ -213,6 +214,10 @@
     $('#f-prev').src = fotoB64;
     $('#f-prev').style.display = 'block';
   };
+  // modelo del teléfono (ej. "Pixel 6a", "SM-S931B"); Chrome lo da solo a pedido
+  async function modelo() {
+    try { return (await navigator.userAgentData.getHighEntropyValues(['model'])).model || ''; } catch { return ''; }
+  }
   function achicar(file, lado, q) {
     return new Promise((ok, mal) => {
       const img = new Image();
@@ -231,6 +236,7 @@
   $('#form').onsubmit = async e => {
     e.preventDefault();
     const f = e.target;
+    try { localStorage.setItem('gf-nombre', f.por.value.trim()); } catch {}
     $('#f-send').disabled = true;
     $('#f-msg').textContent = 'Enviando…';
     try {
@@ -238,7 +244,7 @@
       const r = await fetch(CFG.API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ t: CFG.TOKEN, codigo: codigoActual, nombre: f.nombre.value, marca: f.marca.value,
                                etiqueta: f.etiqueta.value, mensaje: f.mensaje.value, foto_base64: fotoB64,
-                               aplicar: f.aplicar.checked }) });
+                               aplicar: f.aplicar.checked, por: f.por.value.trim(), dispositivo: await modelo() }) });
       const j = await r.json();
       if (!j.ok) throw new Error({ limite: 'se alcanzó el límite de altas de hoy', foto: 'la foto es muy grande' }[j.error] || j.error || 'error');
       if (j.aplicado) {
