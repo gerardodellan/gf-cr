@@ -99,10 +99,11 @@ function doGet(e) {
     // caché en memoria: abrir la Sheet cuesta ~4 s; un acierto acá responde sin tocarla.
     // Costo aceptado: un acierto no suma al contador `escaneos`, y una revisión a mano tarda hasta CACHE_SEG en verse.
     const cache = CacheService.getScriptCache();
-    const hit = cache.get('p:' + codigo);
+    const hit = cache.get('p2:' + codigo);
     if (hit) return json_(JSON.parse(hit));
     const r = consultar_(codigo);
-    cache.put('p:' + codigo, JSON.stringify(Object.assign({}, r, { nuevo: false })), r.encontrado ? CACHE_SEG : 900);
+    r.codigo = codigo;  // la fila puede tener el código sin el 0 inicial
+    cache.put('p2:' + codigo, JSON.stringify(Object.assign({}, r, { nuevo: false })), r.encontrado ? CACHE_SEG : 900);
     return json_(r);
   } catch (err) {
     return json_({ error: String(err.message || err) });
@@ -182,9 +183,9 @@ function consultar_(codigo) {
     const prev = filaAObj_(sh, fila);
     r.escaneos = Number(prev.escaneos) || 1;
     r.url_foto = prev.url_foto || '';
-    sh.getRange(fila, 1, 1, HOJAS.productos.length).setValues([HOJAS.productos.map(k => celda_(r[k]))]);
+    sh.getRange(fila, 1, 1, HOJAS.productos.length).setValues([HOJAS.productos.map(k => k === 'codigo' ? codigoTexto_(r[k]) : celda_(r[k]))]);
   } else {
-    sh.appendRow(HOJAS.productos.map(k => celda_(r[k])));
+    sh.appendRow(HOJAS.productos.map(k => k === 'codigo' ? codigoTexto_(r[k]) : celda_(r[k])));
   }
   return salida_(r, true);
 }
@@ -362,7 +363,7 @@ const ETIQUETA_NIVEL = {
 };
 
 function altaManual_(codigo, b) {
-  CacheService.getScriptCache().remove('p:' + codigo);
+  CacheService.getScriptCache().remove('p2:' + codigo);
   const cache = CacheService.getScriptCache();
   const kDia = 'altas:' + Utilities.formatDate(new Date(), 'America/Costa_Rica', 'yyyyMMdd');
   const altas = Number(cache.get(kDia) || 0);
@@ -380,7 +381,7 @@ function altaManual_(codigo, b) {
   const corto = (s, n) => celda_(String(s || '').slice(0, n));
   const aplicar = b.aplicar === true && ETIQUETA_NIVEL[b.etiqueta];
   const reg = hoja_('registro');
-  reg.appendRow([new Date(), codigo, corto(b.nombre, 120), corto(b.marca, 80), corto(b.etiqueta, 60),
+  reg.appendRow([new Date(), codigoTexto_(codigo), corto(b.nombre, 120), corto(b.marca, 80), corto(b.etiqueta, 60),
                  corto(b.mensaje, 1000), url, aplicar ? 'aplicado' : 'pendiente']);
   const sh = hoja_('productos');
   const fila = buscarFila_(sh, codigo);
@@ -392,7 +393,7 @@ function altaManual_(codigo, b) {
       nivel: nivel, estado: NIVEL_ESTADO[nivel], motivo: 'Corregido a mano: ' + motivo, fuente: 'manual',
       fecha_consulta: new Date(), revisado: true, url_foto: url || prev.url_foto || '', escaneos: Number(prev.escaneos) || 0,
     });
-    const valores = [HOJAS.productos.map(k => celda_(r[k] === undefined ? '' : r[k]))];
+    const valores = [HOJAS.productos.map(k => k === 'codigo' ? codigoTexto_(codigo) : celda_(r[k] === undefined ? '' : r[k]))];
     if (fila) sh.getRange(fila, 1, 1, HOJAS.productos.length).setValues(valores);
     else sh.appendRow(valores[0]);
     return { ok: true, aplicado: salida_(r, false) };
@@ -400,7 +401,7 @@ function altaManual_(codigo, b) {
   // sin "aplicar": un producto nuevo entra como E (sin revisar) y queda pendiente
   if (!fila) {
     sh.appendRow(HOJAS.productos.map(k => ({
-      codigo: codigo, nombre: corto(b.nombre, 120), marca: corto(b.marca, 80), nivel: 'E', estado: 'AMARILLO',
+      codigo: codigoTexto_(codigo), nombre: corto(b.nombre, 120), marca: corto(b.marca, 80), nivel: 'E', estado: 'AMARILLO',
       motivo: 'Agregado a mano, sin revisar', ingredientes: '', fuente: 'manual', fecha_consulta: new Date(),
       revisado: false, url_foto: url, escaneos: 0,
     })[k]));
@@ -420,10 +421,26 @@ function hoja_(k) {
     .getSheetByName(NOMBRE_HOJA[k]);
 }
 
+/** Sheets guardó algunos códigos como número y se comió el 0 inicial: se compara sin ceros a la izquierda.
+ *  Con filas repetidas (las dejó ese error) gana la revisada; si no hay, la última. */
 function buscarFila_(sh, codigo) {
   if (sh.getLastRow() < 2) return 0;
-  const hit = sh.getRange(2, 1, sh.getLastRow() - 1, 1).createTextFinder(codigo).matchEntireCell(true).findNext();
-  return hit ? hit.getRow() : 0;
+  const sin0 = v => String(v).replace(/^0+/, '');
+  const buscado = sin0(codigo);
+  const ncol = HOJAS.productos.indexOf('revisado') + 1;
+  const v = sh.getRange(2, 1, sh.getLastRow() - 1, ncol).getValues();
+  let ultima = 0;
+  for (let i = 0; i < v.length; i++) {
+    if (sin0(v[i][0]) !== buscado) continue;
+    if (v[i][ncol - 1] === true) return i + 2;
+    ultima = i + 2;
+  }
+  return ultima;
+}
+
+/** El código se escribe siempre como texto: con el apóstrofo Sheets no lo convierte a número. */
+function codigoTexto_(c) {
+  return "'" + String(c);
 }
 
 function filaAObj_(sh, fila) {
