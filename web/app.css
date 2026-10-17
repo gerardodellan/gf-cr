@@ -144,3 +144,6 @@ form input[type=file] { display: block; margin-top: 10px; font-size: 12px; }
 .sc-manual input { flex: 1; height: 42px; border: 0; border-radius: 6px; font: inherit; font-size: 17px; padding: 0 12px; letter-spacing: 1px; }
 .sc-manual button { background: var(--verde-boton); color: #fff; border-radius: 6px; padding: 0 16px; font-weight: 700; }
 .sc-manual[hidden] { display: none; }
+
+#form label.chk { display: flex; align-items: center; gap: 10px; font-weight: 500; }
+#form label.chk input { width: 22px; height: 22px; margin: 0; flex: none; }

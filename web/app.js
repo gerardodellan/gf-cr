@@ -103,9 +103,25 @@
              fuente: x[3] ? 'MP-baja' : 'MP', fecha_consulta: x[3] ? 'ya no lo lista desde ' + fecha(x[3]) : fecha(indice.v), revisado: false };
   }
 
+  // ---------- correcciones hechas en este teléfono (ganan sobre el índice y la API; sirven sin señal) ----------
+  const CKEY = 'gf-correcciones';
+  function leerCorr() { try { return JSON.parse(localStorage.getItem(CKEY)) || {}; } catch { return {}; } }
+  function guardarCorr(p) {
+    const c = leerCorr();
+    c[canon(p.codigo)] = p;
+    try { localStorage.setItem(CKEY, JSON.stringify(c)); } catch {}
+  }
+
   // ---------- API ----------
   async function consultar(codigo, { silencioso = false } = {}) {
     codigoActual = codigo;
+    const corr = leerCorr()[canon(codigo)];
+    if (corr) {
+      if (silencioso) return;
+      agregarHist(corr);
+      pintarResultado(corr);
+      return mostrar('result');
+    }
     // índice primero: respuesta instantánea y sin señal; después la API refresca en silencio
     // (trae una revisión manual o un dato más nuevo si lo hay)
     const local = !silencioso && buscarIndice(codigo);
@@ -180,6 +196,7 @@
     $('#f-msg').textContent = '';
     $('#f-send').disabled = false;
     $('#f-codigo').textContent = codigoActual;
+    f.aplicar.checked = true;
     if (producto && producto.codigo === codigoActual) {
       f.nombre.value = producto.nombre || '';
       f.marca.value = producto.marca || '';
@@ -220,9 +237,17 @@
       // text/plain a propósito: application/json dispara preflight y Apps Script no lo contesta
       const r = await fetch(CFG.API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ t: CFG.TOKEN, codigo: codigoActual, nombre: f.nombre.value, marca: f.marca.value,
-                               etiqueta: f.etiqueta.value, mensaje: f.mensaje.value, foto_base64: fotoB64 }) });
+                               etiqueta: f.etiqueta.value, mensaje: f.mensaje.value, foto_base64: fotoB64,
+                               aplicar: f.aplicar.checked }) });
       const j = await r.json();
       if (!j.ok) throw new Error({ limite: 'se alcanzó el límite de altas de hoy', foto: 'la foto es muy grande' }[j.error] || j.error || 'error');
+      if (j.aplicado) {
+        guardarCorr(j.aplicado);
+        agregarHist(j.aplicado);
+        $('#f-msg').textContent = 'Listo. Desde ahora sale: ' + (NIVELES[j.aplicado.nivel] || NIVELES.E).titulo + '.';
+        setTimeout(() => { volverAlInicio(); codigoActual = j.aplicado.codigo; pintarResultado(j.aplicado); mostrar('result'); }, 1400);
+        return;
+      }
       $('#f-msg').textContent = '¡Gracias! Queda en ALERTA hasta que se revise.';
       setTimeout(volverAlInicio, 1600);
     } catch (err) {

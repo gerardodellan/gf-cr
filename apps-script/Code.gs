@@ -350,6 +350,17 @@ function harinaConEspecie_(txt, termino) {
 
 // ---------- alta manual ----------
 
+// Corrección aplicada desde el teléfono (decisión de Gerardo, 16-oct): quien tiene el empaque en la mano fija el nivel.
+// El nivel sale de lo que dice la etiqueta; "no dice nada" sigue en C (amarillo), como la regla.
+const ETIQUETA_NIVEL = {
+  'sin gluten': ['B', 'La etiqueta dice "sin gluten"'],
+  'fabricante sin gluten': ['B', 'El fabricante confirmó que no tiene gluten'],
+  'contiene trigo': ['F', 'La etiqueta dice que contiene trigo o gluten'],
+  'planta que procesa trigo': ['D', 'Fabricado en planta o equipo que procesa trigo'],
+  'puede contener trigo': ['D', 'La etiqueta dice "puede contener" trigo o trazas'],
+  'nada': ['C', 'La etiqueta no dice nada sobre gluten'],
+};
+
 function altaManual_(codigo, b) {
   CacheService.getScriptCache().remove('p:' + codigo);
   const cache = CacheService.getScriptCache();
@@ -367,12 +378,27 @@ function altaManual_(codigo, b) {
     url = f.getUrl();
   }
   const corto = (s, n) => celda_(String(s || '').slice(0, n));
+  const aplicar = b.aplicar === true && ETIQUETA_NIVEL[b.etiqueta];
   const reg = hoja_('registro');
   reg.appendRow([new Date(), codigo, corto(b.nombre, 120), corto(b.marca, 80), corto(b.etiqueta, 60),
-                 corto(b.mensaje, 1000), url, 'pendiente']);
-  // un producto nuevo entra como E (sin revisar): nunca cambia de color sin revisión
+                 corto(b.mensaje, 1000), url, aplicar ? 'aplicado' : 'pendiente']);
   const sh = hoja_('productos');
-  if (!buscarFila_(sh, codigo)) {
+  const fila = buscarFila_(sh, codigo);
+  if (aplicar) {
+    const [nivel, motivo] = ETIQUETA_NIVEL[b.etiqueta];
+    const prev = fila ? filaAObj_(sh, fila) : {};
+    const r = Object.assign({}, prev, {
+      codigo: codigo, nombre: corto(b.nombre, 120) || prev.nombre || '', marca: corto(b.marca, 80) || prev.marca || '',
+      nivel: nivel, estado: NIVEL_ESTADO[nivel], motivo: 'Corregido a mano: ' + motivo, fuente: 'manual',
+      fecha_consulta: new Date(), revisado: true, url_foto: url || prev.url_foto || '', escaneos: Number(prev.escaneos) || 0,
+    });
+    const valores = [HOJAS.productos.map(k => celda_(r[k] === undefined ? '' : r[k]))];
+    if (fila) sh.getRange(fila, 1, 1, HOJAS.productos.length).setValues(valores);
+    else sh.appendRow(valores[0]);
+    return { ok: true, aplicado: salida_(r, false) };
+  }
+  // sin "aplicar": un producto nuevo entra como E (sin revisar) y queda pendiente
+  if (!fila) {
     sh.appendRow(HOJAS.productos.map(k => ({
       codigo: codigo, nombre: corto(b.nombre, 120), marca: corto(b.marca, 80), nivel: 'E', estado: 'AMARILLO',
       motivo: 'Agregado a mano, sin revisar', ingredientes: '', fuente: 'manual', fecha_consulta: new Date(),
