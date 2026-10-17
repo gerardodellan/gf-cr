@@ -267,6 +267,15 @@ const NEGACIONES = /sin trigo|no contiene trigo|wheat free|wheat-free|libre( de)
 const PLACEHOLDER = /ver (la )?etiqueta|see (the )?package|^ingredientes?:?$|^ingredients?:?$|por cada 100 ?g|energia total|valor energetico|nutrition facts/;
 // lista cortada ("…; entre otros", "etc."): no es completa, nunca puede dar C
 const CORTADA = /entre otros|\betc\b|y otros ingredientes|among others/;
+// El catálogo a veces pone la TABLA NUTRICIONAL en el campo de ingredientes (6 productos el 17-oct:
+// Galletas Bokitas, Harina Maseca para empanadas, …). Sin esto, un texto sin términos de gluten se
+// lee como lista completa y el producto sale C "sin ingredientes con gluten" — un motivo engañoso.
+// Señal: tres o más cifras con unidad y casi ninguna coma; una lista real separa con comas.
+function soloTabla_(t) {
+  const p = plano_(t);
+  const cifras = (p.match(/\d+[.,]?\d*\s*(g|mg|kcal|kj|%)\b/g) || []).length;
+  return cifras >= 3 && (t.match(/,/g) || []).length <= 1;
+}
 const FRASES_TRAZAS = ['trazas', 'puede contener',
   '(fabricado|elaborado|procesado|envasado|producido) en (una |la |las |los )?(planta|plantas|fabrica|linea|lineas|equipo|equipos|instalaciones)',
   '(equipo|equipos|linea|lineas|planta) que (tambien )?procesa', 'may contain', 'processed in a facility', 'manufactured in a facility', 'made in a facility', 'shared equipment'];
@@ -285,7 +294,7 @@ function clasificar_(p, terminos) {
   const alerg = tags(p.alergenos), trazas = tags(p.trazas), etiq = tags(p.etiquetas);
   // la línea "Alérgenos: …" no es lista de ingredientes: sin lista real no hay C
   const lista = txt.replace(/(alergenos|allergens|contiene)\s*:[^]*$/, '').replace(/[.;:\s]+$/, '');
-  const completo = !PLACEHOLDER.test(txt) && !CORTADA.test(txt) && lista.length >= 3;
+  const completo = !PLACEHOLDER.test(txt) && !CORTADA.test(txt) && !soloTabla_(txt) && lista.length >= 3;
 
   // fila 2 — ROJO. Los tags de OFF valen aunque el texto venga en otro idioma
   const TAGS_ROJO = ['en:wheat', 'en:wheat-flour', 'en:whole-wheat', 'en:barley', 'en:rye', 'en:malt', 'en:spelt', 'en:kamut',
