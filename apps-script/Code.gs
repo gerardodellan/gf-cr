@@ -278,7 +278,11 @@ function soloTabla_(t) {
 }
 const FRASES_TRAZAS = ['trazas', 'puede contener',
   '(fabricado|elaborado|procesado|envasado|producido) en (una |la |las |los )?(planta|plantas|fabrica|linea|lineas|equipo|equipos|instalaciones)',
-  '(equipo|equipos|linea|lineas|planta) que (tambien )?procesa', 'may contain', 'processed in a facility', 'manufactured in a facility', 'made in a facility', 'shared equipment'];
+  '(equipo|equipos|linea|lineas|planta) que (tambien )?procesa', 'may contain', 'processed in a facility', 'manufactured in a facility', 'made in a facility', 'shared equipment',
+  // "manufactured on (the same) equipment that processes …" aparece en los empaques de EE. UU. (Hershey's,
+  // M&M's). Sin esta frase la cláusula se leía como lista de ingredientes y daba F en vez de D (17-oct)
+  '(manufactured|processed|produced|packaged) (on|in) (the )?(same )?(equipment|facility|line)[a-z ]*that process[a-z]*',
+  '(produced|packaged) in a facility'];
 const HARINAS_SIN_GLUTEN = ['alforfon', 'sorgo', 'amaranto', 'teff', 'buckwheat', 'sorghum', 'amaranth', 'maiz', 'arroz', 'yuca', 'papa', 'almendra', 'coco', 'garbanzo', 'soya', 'soja', 'platano', 'quinoa',
   'corn', 'rice', 'almond', 'coconut', 'potato', 'tapioca', 'chickpea'];
 
