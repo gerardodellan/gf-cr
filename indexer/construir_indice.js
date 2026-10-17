@@ -34,7 +34,21 @@ try { for (const l of fs.readFileSync(path.join(__dirname, 'data/lecturas-fotos.
 } } catch {}
 try { for (const o of JSON.parse(fs.readFileSync(path.join(__dirname, 'data/fotos-lecturas.json'), 'utf8')))
   if (o.encontrado || (o.alergenos || '').trim()) fotos[o.ean] = o; } catch {}
-let porFoto = 0;
+// Verificación de los B: un B es el único nivel que le dice a Yin "comelo". Un segundo modelo
+// (data/verificacion-b.jsonl, indexer/candidatos_b.js) releyó las mismas fotos; el B se mantiene
+// solo si los dos leyeron la frase. Si no coinciden, baja a E "confirmar en el empaque".
+const verifB = {};
+try { for (const l of fs.readFileSync(path.join(__dirname, 'data/verificacion-b.jsonl'), 'utf8').trim().split('\\n')) {
+  if (!l) continue; const o = JSON.parse(l); if (o.lectura) verifB[o.ean] = o.lectura;
+} } catch {}
+const confirmaB = (ean, nombre) => {
+  const r = verifB[ean];
+  if (!r) return false;
+  let t = (r.ingredientes || '').trim();
+  if ((r.alergenos || '').trim()) t += (t ? '. ' : '') + 'Alérgenos: ' + r.alergenos.trim();
+  return clasificar_({ ingredientes: t, nombre: nombre }, T).nivel === 'B';
+};
+let porFoto = 0, bSinConfirmar = 0;
 for (const x of crudo) {
   let txt = x.ingredientes.trim();
   if (x.alergenos && !/^(si|sí|no|n\\/a)$/i.test(x.alergenos.trim())) txt = (txt ? txt + '. ' : '') + 'Alérgenos: ' + x.alergenos;
@@ -55,6 +69,11 @@ for (const x of crudo) {
       // piloto donde pasaba (achiote, tortilla de maíz, yuquitas) eran errores del catálogo —verificados
       // mirando la foto—, pero la foto del catálogo puede ser vieja y la ficha del proveedor nueva.
       // Bajarlo solo lo hace una revisión manual con el empaque en la mano (columna revisado en la Sheet).
+      // el B solo sobrevive con la confirmación del segundo modelo
+      if (cn.nivel === 'B' && !confirmaB(x.ean, x.nombre)) {
+        cn = { nivel: 'E', motivo: 'La foto dice "sin gluten" pero un segundo modelo no lo confirmó; revisar el empaque' };
+        bSinConfirmar++;
+      }
       const R = { A: 0, B: 1, C: 2, D: 3, E: 4, F: 5 };
       if (c.motivo !== 'Sin información suficiente' && R[cn.nivel] < R[c.nivel])
         cn = { nivel: c.nivel, motivo: c.motivo + ' (la foto no lo declara; gana el mayor riesgo)' };
@@ -84,6 +103,6 @@ const n = Object.keys(p).length, noListados = Object.values(p).filter(x => x[3])
 const sinCambios = !nuevos && !cambiados && !bajas && !vueltos && Object.keys(previo.p).length === n;
 fs.writeFileSync(salida, JSON.stringify({ v: sinCambios ? previo.v : hoy, fuente: 'MaxiPalí', p }));
 fs.writeFileSync(fEstado, JSON.stringify({ recorrido: crudo.length, fecha: hoy }));
-console.log('indice ' + n + ' productos · nuevos ' + nuevos + ' · cambiados ' + cambiados + ' · por foto ' + porFoto + ' · por Auto Mercado ' + cruzados + ' · bajas hoy ' + bajas + ' · vueltos ' + vueltos + ' · ya no listados ' + noListados +
+console.log('indice ' + n + ' productos · nuevos ' + nuevos + ' · cambiados ' + cambiados + ' · por foto ' + porFoto + ' · B sin confirmar ' + bSinConfirmar + ' · por Auto Mercado ' + cruzados + ' · bajas hoy ' + bajas + ' · vueltos ' + vueltos + ' · ya no listados ' + noListados +
             ' · sin información (quedan para la API) ' + fuera + ' · ' + Math.round(fs.statSync(salida).size / 1024) + ' KB');
 `);

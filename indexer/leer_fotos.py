@@ -86,21 +86,22 @@ def leer(ean, modelo, proveedor):
     return fila
 
 
-def ya_leidos():
+def ya_leidos(salida):
     hechos = set()
-    if os.path.exists(SALIDA):
-        for l in open(SALIDA, encoding='utf-8'):
+    if os.path.exists(salida):
+        for l in open(salida, encoding='utf-8'):
             try:
                 o = json.loads(l)
             except json.JSONDecodeError:
                 continue
             if o.get('lectura'):
                 hechos.add(o['ean'])
-    try:   # el piloto del 16-oct ya tiene estos 100: no se vuelven a pagar
-        for o in json.load(open(REF_PILOTO, encoding='utf-8')):
-            hechos.add(o['ean'])
-    except Exception:
-        pass
+    if salida == SALIDA:
+        try:   # el piloto del 16-oct ya tiene estos 100: no se vuelven a pagar
+            for o in json.load(open(REF_PILOTO, encoding='utf-8')):
+                hechos.add(o['ean'])
+        except Exception:
+            pass
     return hechos
 
 
@@ -111,9 +112,10 @@ def main():
     ap.add_argument('--n', type=int, default=0, help='tope de productos (0 = sin tope)')
     ap.add_argument('--paralelo', type=int, default=8)
     ap.add_argument('--eans', help='archivo con un EAN por línea; sin esto, toda carpeta de fotos sin lectura')
+    ap.add_argument('--salida', default=SALIDA, help='otro jsonl de salida (ej. la verificación de los B)')
     a = ap.parse_args()
 
-    hechos = ya_leidos()
+    hechos = ya_leidos(a.salida)
     con_fotos = sorted(e for e in os.listdir(FOTOS) if os.path.isdir(os.path.join(FOTOS, e)))
     if a.eans:
         quiero = {l.strip() for l in open(a.eans) if l.strip()}
@@ -123,7 +125,7 @@ def main():
         pendientes = pendientes[:a.n]
     print(f'a leer {len(pendientes)} productos · modelo {a.modelo} ({a.proveedor})', flush=True)
     costo, errores = 0.0, 0
-    with open(SALIDA, 'a', encoding='utf-8') as f, ThreadPoolExecutor(a.paralelo) as ex:
+    with open(a.salida, 'a', encoding='utf-8') as f, ThreadPoolExecutor(a.paralelo) as ex:
         for i, fila in enumerate(ex.map(lambda e: leer(e, a.modelo, a.proveedor), pendientes)):
             f.write(json.dumps(fila, ensure_ascii=False) + '\n')
             f.flush()
