@@ -11,6 +11,12 @@
 const TOKEN = 'IKtImWFs97m3';
 const UA = 'GF-CR/0.1 (gerry.dellan@gmail.com)';
 const TTL_DIAS = 30;
+// Instante de la última vez que cambió la regla de clasificación, en UTC. Una fila guardada ANTES se
+// recalcula aunque no haya vencido el TTL: si no, un arreglo de la regla tarda hasta 30 días en llegar
+// a un producto ya escaneado. Al tocar clasificar_ o TERMINOS_INICIALES, poner acá el momento del
+// despliegue. Va con hora y Z: una fecha suelta se lee como medianoche UTC, que en Costa Rica son las
+// 18:00 del día anterior, y las filas guardadas esa tarde se seguían dando por frescas.
+const REGLA_DESDE = '2026-10-17T05:20:00Z';
 const CACHE_SEG = 3600;
 const MAX_FOTO_BYTES = 1500000;
 const MAX_ALTAS_DIA = 50;
@@ -150,7 +156,8 @@ function consultar_(codigo) {
   if (fila) {
     const r = filaAObj_(sh, fila);
     sh.getRange(fila, HOJAS.productos.indexOf('escaneos') + 1).setValue((Number(r.escaneos) || 0) + 1);
-    const fresco = r.fecha_consulta && (ahora - new Date(r.fecha_consulta)) / 864e5 < TTL_DIAS;
+    const fresco = r.fecha_consulta && (ahora - new Date(r.fecha_consulta)) / 864e5 < TTL_DIAS
+      && new Date(r.fecha_consulta) >= new Date(REGLA_DESDE);
     if (r.revisado === true || !['OFF', 'MP'].includes(r.fuente) || fresco) return salida_(r, false);
   }
   // Orden de fuentes (decisión de Gerardo, 16-oct): la tienda local primero; Open Food Facts solo si la tienda
