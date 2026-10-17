@@ -23,8 +23,15 @@ let nuevos = 0, cambiados = 0, fuera = 0, vueltos = 0, cruzados = 0;
 const cruce = {};
 try { for (const l of fs.readFileSync(path.join(__dirname, 'data/cruce.jsonl'), 'utf8').trim().split('\\n')) { if (l) { const o = JSON.parse(l); cruce[o.ean] = o.texto; } } } catch {}
 const listados = new Set();
-// lecturas de fotos de etiqueta de la propia tienda (agentes; data/fotos-lecturas.json)
+// lecturas de fotos de etiqueta de la propia tienda. Dos fuentes, misma forma:
+//   data/fotos-lecturas.json   referencia del piloto del 16-oct (100 productos, leídos por agentes)
+//   data/lecturas-fotos.jsonl  corridas del modelo de visión (indexer/leer_fotos.py), append-only
+// El piloto se carga último: su lectura gana sobre la del modelo para el mismo EAN.
 const fotos = {};
+try { for (const l of fs.readFileSync(path.join(__dirname, 'data/lecturas-fotos.jsonl'), 'utf8').trim().split('\\n')) {
+  if (!l) continue; const o = JSON.parse(l); const r = o.lectura;
+  if (r && (r.encontrado || (r.alergenos || '').trim())) fotos[o.ean] = r;
+} } catch {}
 try { for (const o of JSON.parse(fs.readFileSync(path.join(__dirname, 'data/fotos-lecturas.json'), 'utf8')))
   if (o.encontrado || (o.alergenos || '').trim()) fotos[o.ean] = o; } catch {}
 let porFoto = 0;
@@ -41,8 +48,17 @@ for (const x of crudo) {
     if ((fo.alergenos || '').trim()) tf += (tf ? '. ' : '') + 'Alérgenos: ' + fo.alergenos.trim();
     const cf = clasificar_({ ingredientes: tf, nombre: x.nombre }, T);
     if (cf.motivo !== 'Sin información suficiente') {
-      if (fo.legibilidad === 'completa' || ['F', 'D', 'E'].includes(cf.nivel)) c = { nivel: cf.nivel, motivo: cf.motivo + ' (foto de etiqueta)' };
-      else c = { nivel: 'E', motivo: 'Foto de etiqueta parcial sin ingredientes con gluten; confirmar en el empaque' };
+      let cn;
+      if (fo.legibilidad === 'completa' || ['F', 'D', 'E'].includes(cf.nivel)) cn = { nivel: cf.nivel, motivo: cf.motivo + ' (foto de etiqueta)' };
+      else cn = { nivel: 'E', motivo: 'Foto de etiqueta parcial sin ingredientes con gluten; confirmar en el empaque' };
+      // La foto NUNCA baja el riesgo que ya declaró el catálogo de la tienda (16-oct). Los 3 casos del
+      // piloto donde pasaba (achiote, tortilla de maíz, yuquitas) eran errores del catálogo —verificados
+      // mirando la foto—, pero la foto del catálogo puede ser vieja y la ficha del proveedor nueva.
+      // Bajarlo solo lo hace una revisión manual con el empaque en la mano (columna revisado en la Sheet).
+      const R = { A: 0, B: 1, C: 2, D: 3, E: 4, F: 5 };
+      if (c.motivo !== 'Sin información suficiente' && R[cn.nivel] < R[c.nivel])
+        cn = { nivel: c.nivel, motivo: c.motivo + ' (la foto no lo declara; gana el mayor riesgo)' };
+      c = cn;
       porFoto++;
     }
   }

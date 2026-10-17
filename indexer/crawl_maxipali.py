@@ -53,9 +53,13 @@ def main():
                         ean = (it.get('ean') or '').strip()
                         if not ean.isdigit() or ean in vistos: continue
                         vistos.add(ean)
+                        # URLs de la galería del producto: las usa descargar_fotos.py. La URL sin sufijo de
+                        # tamaño trae el original (1000x1000, medido 16-oct); el sufijo -1600-1600 solo escala.
+                        imgs = [i['imageUrl'] for i in (it.get('images') or []) if i.get('imageUrl')]
                         f.write(json.dumps({'ean': ean, 'nombre': p.get('productName', ''), 'marca': p.get('brand', ''),
                                             'categoria': ruta, 'ingredientes': campo(p, 'Listado de ingredientes'),
-                                            'alergenos': campo(p, 'Productos alérgenos')}, ensure_ascii=False) + '\n')
+                                            'alergenos': campo(p, 'Productos alérgenos'),
+                                            'imagenes': imgs}, ensure_ascii=False) + '\n')
                 if len(prods) < 50: break
                 desde += 50
     os.replace(tmp, os.path.join(D, 'crudo.jsonl'))
